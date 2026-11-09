@@ -4,6 +4,8 @@ A live terminal dashboard for [Claude Code](https://claude.com/claude-code). It 
 
 Run `claude` and the monitor opens next to it automatically: through a tmux split in a regular terminal, or through a small extension in VSCode.
 
+![Claude Monitor preview](assets/demo.png)
+
 ## Core features
 
 - **The bill**: live session cost split into input, cache write, cache read and output, with per-model pricing (Opus, Sonnet, Haiku, Fable) and cost share per agent.
