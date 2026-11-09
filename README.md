@@ -8,7 +8,7 @@ Run `claude` and the monitor opens next to it automatically: through a tmux spli
 
 ## Core features
 
-- **The bill**: live session cost split into input, cache write, cache read and output, with per-model pricing (Opus, Sonnet, Haiku, Fable) and cost share per agent.
+- **The bill**: live session cost split into input, cache write, cache read and output, with per-model pricing (Opus, Sonnet, Haiku, Fable) and cost share per agent. Costs are estimates from a hardcoded price table (`PRICES` in `claude-monitor.py`), not your actual invoice.
 - **Context window**: tokens used against the auto-compaction window, broken down by system prompt, tools, MCP tools, skills, agents, memory files and messages. Respects `CLAUDE_CODE_AUTO_COMPACT_WINDOW`.
 - **Agent team view**: each subagent with its model, state (running, done, failed, stalled), current tool, cost and a flow diagram from the main session.
 - **Background tasks**: running and finished bash tasks, with the last line of their output and exit codes.
@@ -86,3 +86,7 @@ The project must have at least one Claude Code session. In live mode, `monitor-r
 | `claude-monitor.zsh` | `claude` wrapper that creates the tmux split |
 | `tmux.conf` | Config for the dedicated tmux server (`tmux -L claude`) |
 | `vscode/` | VSCode extension source and packaged `.vsix` |
+
+## License
+
+[MIT](LICENSE)

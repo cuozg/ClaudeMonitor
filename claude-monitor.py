@@ -272,17 +272,12 @@ def find_claude_project_dir(target_dir):
     resolved_path = str(target_dir.resolve())
     encoded_cwd = re.sub(r'[^a-zA-Z0-9]', '-', resolved_path).strip('-')
 
-    # 1. Khớp chính xác tên thư mục mã hóa
+    # 1. Exact match on the encoded directory name
     for p in claude_projects.iterdir():
         if p.is_dir() and p.name.strip('-') == encoded_cwd:
             return p
 
-    # 2. Khớp theo đuôi đường dẫn
-    for p in claude_projects.iterdir():
-        if p.is_dir() and p.name.strip('-').endswith(encoded_cwd):
-            return p
-
-    # 3. Quét kiểm tra field "cwd" trong file .jsonl
+    # 2. Scan the "cwd" field at the top of each .jsonl log
     for p in sorted(claude_projects.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
         if p.is_dir():
             for jf in p.glob("*.jsonl"):
@@ -694,7 +689,7 @@ def task_output_tail(proj_name, task_id):
     if path is None:
         hits = []
         for root in ("/private/tmp", "/tmp"):
-            hits = list(Path(root).glob("claude-*/{}/*/tasks/{}.output".format(proj_name, task_id)))
+            hits = list(Path(root).glob("claude-{}/{}/*/tasks/{}.output".format(os.getuid(), proj_name, task_id)))
             if hits:
                 break
         path = _OUTPUT_PATHS[task_id] = hits[0] if hits else ""
@@ -1431,8 +1426,8 @@ def main():
 
     proj_dir = find_claude_project_dir(target_cwd)
     if not proj_dir:
-        print(f"{C_GOLD}Chưa tìm thấy log của Claude Code cho: {target_cwd}{RESET}")
-        print("Vui lòng khởi chạy 'claude' ít nhất 1 lần trong thư mục này.")
+        print(f"{C_GOLD}No Claude Code logs found for: {target_cwd}{RESET}")
+        print("Run 'claude' in this directory at least once.")
         sys.exit(1)
 
     mon = Monitor()
@@ -1447,7 +1442,7 @@ def main():
                 S = mon.collect(session, target_cwd)
                 lines = build_frame(S, cols, rows, tick, watch_mode)
             else:
-                lines = [f"{C_GOLD}Chưa có phiên làm việc nào được ghi nhận.{RESET}"]
+                lines = [f"{C_GOLD}No session recorded yet.{RESET}"]
 
             if watch_mode:
                 sys.stdout.write(HOME + "\n".join(line + CLR_EOL for line in lines) + CLR_EOS)
