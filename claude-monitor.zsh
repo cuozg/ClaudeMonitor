@@ -19,7 +19,7 @@ claude() {
     local t=(tmux -L claude -f $d/tmux.conf)
     $t new-session -d -s $s -c "$PWD" -x $COLUMNS -y $LINES \
       "${(q)bin} ${(j: :)${(q)@}}; tmux -L claude kill-session -t $s" || { command claude "$@"; return }
-    $t split-window -d -h -l 66% -t $s -c "$PWD" "${(q)d}/monitor-run.sh ${(q)PWD}"
+    $t split-window -d -h -l 50% -t $s -c "$PWD" "${(q)d}/monitor-run.sh ${(q)PWD}"
     $t attach -t $s
   else
     command claude "$@"
