@@ -40,7 +40,8 @@ Or load a clone directly in every session (CLI, Desktop and VS Code), by adding 
 ## Usage
 
 - The pane opens when a session starts. In the terminal it docks on the right in [fullscreen rendering](https://code.claude.com/docs/en/fullscreen.md) (`/tui fullscreen`), up to 45% of the width; in a narrower terminal it waits until you open it.
-- `/monitor` opens or closes the pane. A pane you close stays closed for that session until you run `/monitor` again.
+- A one-line band above the prompt shows the cost, context, agents and background tasks, with a **Show monitor / Hide monitor** button (CLI and Desktop; VS Code does not draw this band).
+- `/monitor` opens or closes the pane too. A pane you close stays closed for that session until you open it again.
 - `Ctrl+X` then an arrow key resizes the pane in the terminal.
 
 ## Files

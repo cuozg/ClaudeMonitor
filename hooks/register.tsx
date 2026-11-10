@@ -5,7 +5,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { CtxView, Mon, Owner, Task } from '../types'
 import { addTok, describeTool, firstLine, newOwner, price, summaryLine, taskNotes } from './lib'
-import { drawMonitor } from './view'
+import { drawBand, drawMonitor } from './view'
 
 const PANE = 'session-monitor'
 const TITLE = 'Monitor'
@@ -68,6 +68,20 @@ async function openPane($: EngineInterface, columns = DOCK_COLUMNS) {
   return $.ui.open({ id: PANE, title: TITLE, columns })
 }
 
+const isShown = async ($: EngineInterface) => (await $.ui.panes()).some(p => p.id === PANE && p.isPlaced)
+
+/** Closes the pane when a surface draws it, else opens it; says which. */
+async function toggle($: EngineInterface, columns?: number): Promise<'opened' | 'closed'> {
+  if (await isShown($)) {
+    await $.ui.close({ id: PANE })
+    await edit($, m => void (m.closed = true))
+    return 'closed'
+  }
+  await edit($, m => void (m.closed = false))
+  await openPane($, columns ? Math.ceil(columns * 0.45) : DOCK_COLUMNS)
+  return 'opened'
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'monitor', description: 'Open or close the session monitor pane', immediate: true })
@@ -90,15 +104,8 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'monitor' }, async ($, e) => {
-    const shown = (await $.ui.panes()).some(p => p.id === PANE)
-    if (shown) {
-      await $.ui.close({ id: PANE })
-      await edit($, m => void (m.closed = true))
-      return { text: 'Monitor closed.', isTextDisplayOnly: true }
-    }
-    await edit($, m => void (m.closed = false))
-    await openPane($, Math.ceil(e.presentation.columns * 0.45))
-    return { text: 'Monitor opened.', isTextDisplayOnly: true }
+    const done = await toggle($, e.presentation.columns)
+    return { text: done === 'closed' ? 'Monitor closed.' : 'Monitor opened.', isTextDisplayOnly: true }
   })
 
   on('ui.close', async ($, e, next) => {
@@ -262,5 +269,13 @@ export const register: Register = on => {
     ])
     const home = (await $.env.get('HOME')) ?? ''
     return drawMonitor(els, { m, cx, usage, agents, now, cwd, home, sid, tick, width: e.props.bodyColumns })
+  })
+
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.props.hasSurvey) return next(e)
+    const els = $.ui.resolve(e)
+    const [m, usage, agents, shown] = await Promise.all([read($, data), $.session.usage(), $.agent.list(), isShown($)])
+    const columns = e.viewport?.columns
+    return drawBand(els, { m, usage, agents, shown, tick, width: e.props.bodyColumns, onToggle: () => void toggle($, columns) })
   })
 }

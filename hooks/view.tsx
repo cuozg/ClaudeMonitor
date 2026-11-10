@@ -177,7 +177,7 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
   const mi = Math.max(4, cardW - 4)
   const totUsd = sumTok(usd) || 1
   const meters = (
-    <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
+    <Box flexDirection="row" flexWrap="wrap" columnGap={1} rowGap="sm">
       {([['in', 'input', 'uncached', C.orange], ['cw', 'cache write', 'written', C.pink], ['cr', 'cache read', 'hits', C.blue], ['out', 'output', 'generated', C.gold]] as const).map(
         ([key, name, sub, col]) => (
           <Box flexDirection="column" borderStyle="round" borderColor={col} paddingX={1} width={cardW} alignItems="center">
@@ -401,12 +401,12 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
   )
 
   return (
-    <Box flexDirection="column" width={W}>
+    <Box flexDirection="column" width={W} rowGap="sm">
       {header}
       {mainBox}
       {team}
       {meters}
-      <Box flexDirection={side < W ? 'row' : 'column'} columnGap={1}>
+      <Box flexDirection={side < W ? 'row' : 'column'} columnGap={1} rowGap="sm">
         {bill}
         {context}
       </Box>
@@ -416,6 +416,54 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
       {timeline}
       {log}
       {status}
+    </Box>
+  )
+}
+
+type BandEls = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
+type BandInput = {
+  m: Mon
+  usage: SessionUsage
+  agents: AgentInfo[]
+  shown: boolean
+  tick: number
+  width: number
+  onToggle: () => void
+}
+
+/** The one-line band above the prompt: the key figures and the pane's toggle. */
+export function drawBand({ Box, Text, Button }: BandEls, B: BandInput) {
+  const { m, usage } = B
+  const main = m.owners.main!
+  const subs = m.order.length - 1
+  const running = B.agents.filter(a => a.status === 'running' || a.status === 'pending').length
+  const tasks = m.tasks.filter(t => t.state === 'run').length
+  const live = m.working || Object.values(m.owners).some(o => o.flights.length > 0)
+  const window = usage.context.window || 1
+  const tokens = usage.context.tokens ?? main.ctx
+  const pct = usage.context.percent ?? Math.round((tokens / window) * 100)
+  const cost = usage.cost?.usd ?? Object.values(m.owners).reduce((s, o) => s + sumTok(o.usd), 0)
+  const seg = (text: string, color?: string, bold?: boolean) => <Text color={color} bold={bold}>{text}</Text>
+  const dot = ' · '
+  return (
+    <Box flexDirection="row" justifyContent="space-between" columnGap={1} width={Math.max(20, B.width)}>
+      <Text mono wrap="truncate-end">
+        {seg('◧ MONITOR', undefined, true)}
+        {seg(dot, C.dark)}
+        {live ? seg(SPIN[B.tick % SPIN.length]! + ' live', C.green) : seg('○ idle', C.gray)}
+        {seg(dot, C.dark)}
+        {seg(fmtCost(cost), C.gold, true)}
+        {seg(dot, C.dark)}
+        {seg('ctx ', C.gray)}
+        {seg(`${fmtTok(tokens)} ${pct}%`, pct >= 80 ? C.red : pct >= 50 ? C.gold : undefined)}
+        {seg(dot, C.dark)}
+        {seg('agents ', C.gray)}
+        {seg(`${running}/${subs}`, running ? C.green : C.gray)}
+        {seg(dot, C.dark)}
+        {seg('bg ', C.gray)}
+        {seg(String(tasks), tasks ? C.cyan : C.gray)}
+      </Text>
+      <Button key="toggle" label={B.shown ? 'Hide monitor' : 'Show monitor'} onPress={B.onToggle} />
     </Box>
   )
 }

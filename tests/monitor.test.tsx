@@ -90,3 +90,29 @@ test('/monitor toggles the pane', async ($, on) => {
   expect(opened.text).toBe('Monitor opened.')
   expect(open).toBe(true)
 })
+
+const BAND = {
+  plugin: 'session-monitor',
+  component: 'AbovePrompt',
+  requestId: 'band',
+  props: { hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 10, bodyColumns: 100, scroll: { offset: 0, bodyRows: 10 }, view: {} },
+} as const
+
+test('the band above the prompt shows figures and toggles the pane', async ($, on) => {
+  engine(on, { panes: false })
+  let open = true
+  on('ui.open', () => ((open = true), { value: { isPlaced: true } }))
+  on('ui.close', () => ((open = false), { value: undefined }))
+  on('ui.panes', () => ({ value: open ? [{ id: 'session-monitor', title: 'Monitor', isShown: true, isFocused: false, isPlaced: true }] : [] }))
+  for (const surface of ['terminal', 'desktop'] as const) {
+    open = true
+    const ui = await $.ui.mount({ ...BAND, surface })
+    expect(await ui.find({ type: 'Text', text: /\$1\.50/ })).toBeDefined()
+    expect((await ui.find({ key: 'toggle' }))?.text).toMatch(/Hide monitor/)
+    await ui.press({ key: 'toggle' })
+    expect(open).toBe(false)
+    await ui.press({ key: 'toggle' })
+    expect(open).toBe(true)
+    await ui.unmount()
+  }
+})
