@@ -4,6 +4,8 @@
 
 ### Changed
 
+- The band above the prompt no longer shows alerts; they stay in the pane's **Needs attention** box.
+- Every row of the pane ends flush at the section's right edge: the two top columns fill the full width, and the rate-limit, context and subagent rows no longer fall a cell short or long.
 - A blank line separates every section of the pane.
 - **Context** matches the app's own list: the deferred MCP and system tools are rows of their own, and memory files no longer nest under it.
 - **Cost** drops the model rates line and the burn sparkline; the burn rate stays as a figure.

@@ -20,7 +20,7 @@ The same mod works in the Claude Code CLI, the Code tab of the Claude Desktop ap
 - **Agent team view**: each subagent with its model, state (running, waiting, done, failed, stalled), current tool, steps, time, tokens and cost.
 - **Background tasks**: running and finished background shells, monitors and agents.
 - **Timeline and activity**: per-agent activity lanes (once agents exist) and recent prompts, tool calls and replies.
-- **Toggle band**: a line above the prompt with the cost, context, running agents, background tasks and any alert, and a **Show monitor / Hide monitor** button.
+- **Toggle band**: a line above the prompt with the cost, context, running agents, and background tasks, and a **Show monitor / Hide monitor** button.
 - **Needs attention**: a box at the top of the pane, only when something needs a look: failed or stalled agents (no activity for 3 minutes), failed tasks, context above 80% / 90% of the usable window, a rate limit at 80%+, a burn rate above $20/h, 3+ tool errors in 5 minutes, or a main tool call running over 3 minutes. Red items need action, gold ones are a warning.
 
 ## Requirements

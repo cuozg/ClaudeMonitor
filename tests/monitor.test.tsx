@@ -84,7 +84,7 @@ test('the header pill follows the main state, not recent activity', async ($, on
   await ui.unmount()
 })
 
-test('what needs attention is highlighted in the pane and the band', async ($, on) => {
+test('what needs attention is highlighted in the pane, not in the band', async ($, on) => {
   engine(on, { usage: { ...USAGE, rateLimits: [{ kind: 'five_hour', percentUsed: 92 }] }, agents: false, panes: false })
   on('ui.panes', () => ({ value: [] }))
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
@@ -92,7 +92,7 @@ test('what needs attention is highlighted in the pane and the band', async ($, o
   expect(await pane.find({ type: 'Text', text: /5h limit at 92%/ })).toBeDefined()
   await pane.unmount()
   const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  expect(await band.find({ type: 'Text', text: /⚠ 5h limit at 92%/ })).toBeDefined()
+  expect(await band.find({ type: 'Text', text: /⚠/ })).toBeUndefined()
   await band.unmount()
 })
 

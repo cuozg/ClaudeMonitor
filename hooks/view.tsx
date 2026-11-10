@@ -136,8 +136,8 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
       {segs.filter((s): s is Seg => !!s).map(seg)}
     </Text>
   )
-  const spread = (left: (Seg | false)[], right: (Seg | false)[]) => (
-    <Box flexDirection="row" justifyContent="space-between">
+  const spread = (left: (Seg | false)[], right: (Seg | false)[], w?: number) => (
+    <Box flexDirection="row" justifyContent="space-between" width={w}>
       {line(...left)}
       {line(...right)}
     </Box>
@@ -198,11 +198,12 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
 
   // ── Cost ───────────────────────────────────────────────────────────────────
   const side = iw >= 76 ? Math.floor((iw - 3) / 2) : iw
+  const sideR = side < iw ? iw - 3 - side : iw // the right column takes the odd cell, so both columns end flush with the pane
   const totUsd = sumTok(usd) || 1
   const kinds = [['in', 'Input', C.orange], ['cw', 'Cache write', C.pink], ['cr', 'Cache read', C.blue], ['out', 'Output', C.gold]] as const
   const saved = nocache > 0 ? Math.max(0, 1 - exact / nocache) * 100 : 0
   const burnCol = burn > 20 ? C.red : burn > 5 ? C.gold : C.light
-  const lbw = Math.max(4, side - 22)
+  const lbw = Math.max(4, side - 23)
   const limits = usage.rateLimits.map(l => {
     const col = l.percentUsed >= 90 ? C.red : l.percentUsed >= 70 ? C.gold : ACCENT
     const [on, off] = bar(l.percentUsed / 100, lbw)
@@ -216,10 +217,11 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
     ...kinds.map(([key, name, col]) => line(
       ['● ', col], [name.padEnd(13), C.light], [fmtTok(tok[key]).padStart(7), C.gray], [fmtCost(usd[key] * k).padStart(Math.max(9, side - 22)), C.light],
     )),
-    subs.length > 0 && spread([['main ', C.gray], [fmtCost(cost(main)), C.light]], [[`agents · ${subs.length} `, C.gray], [fmtCost(subCost), C.light]]),
+    subs.length > 0 && spread([['main ', C.gray], [fmtCost(cost(main)), C.light]], [[`agents · ${subs.length} `, C.gray], [fmtCost(subCost), C.light]], side),
     spread(
       [['cache hit ', C.gray], [(hitRate(tok) * 100).toFixed(0) + '%', C.light, 'b']],
       [['saved ', C.gray], [saved.toFixed(0) + '%', C.green, 'b'], [' of ', C.dark], [fmtCost(nocache), C.dark, 's']],
+      side,
     ),
     line(['burn ', C.gray], [fmtCost(burn) + '/h', burnCol, 'b']),
     ...limits,
@@ -234,7 +236,7 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
   const deferred = (cx?.rows ?? []).filter(x => x.kind === 'deferred')
   const catCol = (i: number) => LANE[i % LANE.length]!
   const ctxParts: [number, string][] = [...used.map((x, i): [number, string] => [x.tokens, catCol(i)]), [buffer, C.dark]]
-  const nw = Math.max(6, side - 17)
+  const nw = Math.max(6, sideR - 16)
   const dotRow = (col: string, name: string, tokens: number, nameCol: string = C.light) => (
     <Text mono wrap="truncate-end">
       {seg(['● ', col])}
@@ -244,13 +246,13 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
     </Text>
   )
   const context = section('Context', [[pct.toFixed(0) + '%', pctCol, 'b'], [` · ${fmtTok(ctxTok)} / ${fmtTok(lim)}`, C.dark]], [
-    line(...stack(ctxParts, side, lim)),
+    line(...stack(ctxParts, sideR, lim)),
     ...used.map((x, i) => dotRow(catCol(i), x.name, x.tokens)),
     buffer > 0 && dotRow(C.dark, 'Autocompact buffer', buffer),
     free && dotRow(C.track, 'Free space', free.tokens, C.gray),
     !cx && line(['measuring after the first turn…', C.dark]),
     ...deferred.map(x => dotRow(C.track, x.name, x.tokens, C.dark)),
-  ], side)
+  ], sideR)
 
   // ── Subagents ──────────────────────────────────────────────────────────────
   const counts: Record<string, number> = {}
@@ -265,7 +267,7 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
   const nameW = Math.max(10, Math.min(26, Math.floor(iw / 4)))
   const timeW = compact ? 0 : 9
   const costW = 8
-  const nowW = Math.max(8, iw - 2 - nameW - 1 - timeW - costW - 1)
+  const nowW = Math.max(8, iw - 2 - nameW - 1 - timeW - costW)
   const SHOW = 12
   const agentRows = subs.slice(0, SHOW).flatMap(o => {
     const s = states.get(o.id)!
@@ -364,7 +366,7 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
       {[
         header,
         attentionBox,
-        <Box flexDirection={side < iw ? 'row' : 'column'} columnGap={3}>
+        <Box flexDirection={side < iw ? 'row' : 'column'} columnGap={3} width={iw}>
           {bill}
           {side < iw ? null : gap}
           {context}
@@ -404,8 +406,6 @@ export function drawBand({ Box, Text, Button }: BandEls, B: BandInput) {
   const tokens = usage.context.tokens ?? main.ctx
   const pct = Math.round((tokens / window) * 100)
   const cost = usage.cost?.usd ?? Object.values(m.owners).reduce((s, o) => s + sumTok(o.usd), 0)
-  const alerts = attention(m, B.cx, usage, B.agents, B.now)
-  const hot = alerts.some(a => a[1] === C.red)
   const seg = (text: string, color?: string, bold?: boolean) => <Text color={color} bold={bold}>{text}</Text>
   const dot = ' · '
   return (
@@ -414,7 +414,6 @@ export function drawBand({ Box, Text, Button }: BandEls, B: BandInput) {
         {seg('◆ Monitor', ACCENT, true)}
         {seg(dot, C.dark)}
         {live ? seg(SPIN[B.tick % SPIN.length]! + ' live', C.green) : seg('○ idle', C.gray)}
-        {alerts.length > 0 ? [seg(dot, C.dark), seg(`⚠ ${alerts.length === 1 ? alerts[0]![0] : alerts.length + ' alerts'}`, hot ? C.red : C.gold, true)] : []}
         {seg(dot, C.dark)}
         {seg(fmtCost(cost), C.gold, true)}
         {seg(dot, C.dark)}
