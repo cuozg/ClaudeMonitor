@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.1 (2026-11-10)
+
+### Fixed
+
+- In the CLI the pane no longer has a gray fill of its own: it draws on the terminal's background. Desktop and VS Code are unchanged.
+
 ## 2.1.0 (2026-11-10)
 
 ### Added

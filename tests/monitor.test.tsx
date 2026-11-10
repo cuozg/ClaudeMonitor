@@ -32,6 +32,7 @@ function engine(on: On, { usage = USAGE as object, agents = true, panes = true }
   }
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.usage', () => ({ value: usage as typeof USAGE }))
+  on('session.surfaces', () => ({ value: ['terminal'] as const }))
   on('session.cwd', () => ({ value: '/Users/me/shop' }))
   on('session.id', () => ({ value: 'abcdef1234567890' }))
   on('env.get', () => ({ value: '/Users/me' }))
@@ -78,11 +79,13 @@ const RUN = { command: 'monitor', args: '', origin: { kind: 'composer' }, presen
 test('/monitor toggles the pane', async ($, on) => {
   engine(on, { panes: false })
   let open = false
-  on('ui.open', () => ((open = true), { value: { isPlaced: true } }))
   on('ui.close', () => ((open = false), { value: undefined }))
   on('ui.panes', () => ({ value: open ? [{ id: 'session-monitor', title: 'Monitor', isShown: true, isFocused: false, isPlaced: true }] : [] }))
+  let fill: string | undefined
+  on('ui.open', (_, e) => ((open = true), (fill = e.backgroundColor), { value: { isPlaced: true } }))
   await $.session.start({ cwd: '/Users/me/shop', surface: 'terminal', isInteractive: true })
   expect(open).toBe(true)
+  expect(fill).toBe('transparent')
   const closed = await $.command.run(RUN)
   expect(closed.text).toBe('Monitor closed.')
   expect(open).toBe(false)

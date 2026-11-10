@@ -65,7 +65,9 @@ async function measureContext($: EngineInterface) {
 }
 
 async function openPane($: EngineInterface, columns = DOCK_COLUMNS) {
-  return $.ui.open({ id: PANE, title: TITLE, columns })
+  // The terminal paints a docked pane in a fill of its own; draw on the terminal's background instead.
+  const onTerminal = (await $.session.surfaces()).includes('terminal')
+  return $.ui.open({ id: PANE, title: TITLE, columns, ...(onTerminal ? { backgroundColor: 'transparent' } : {}) })
 }
 
 const isShown = async ($: EngineInterface) => (await $.ui.panes()).some(p => p.id === PANE && p.isPlaced)
