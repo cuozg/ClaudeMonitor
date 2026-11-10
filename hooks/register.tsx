@@ -1,7 +1,7 @@
 // Claude Monitor: records the session from engine events into $.state and
 // draws it in a pane beside the chat on every surface (CLI, Desktop, VS Code).
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { AgentInfo, EngineInterface, Register } from 'claude-code'
 
 import type { CtxView, Mon, Owner, Task } from '../types'
 import { addTok, describeTool, firstLine, lineDelta, newOwner, price, summaryLine, taskNotes } from './lib'
@@ -15,7 +15,7 @@ const MAX_LOG = 300
 const MAX_TS = 400
 const MAX_STEPS = 40
 
-const empty = (): Mon => ({ owners: { main: newOwner('main', 'main') }, order: ['main'], log: [], tasks: [], samples: [], working: false, closed: false, agentsClosed: false })
+const empty = (): Mon => ({ owners: { main: newOwner('main', 'main') }, order: ['main'], log: [], tasks: [], samples: [], working: false, closed: false, monitorClosed: false, agentsClosed: false })
 const data = atom({ plugin: 'session-monitor', key: 'data' } as const, empty(), { shape: 'mon-3' })
 const ctx = atom({ plugin: 'session-monitor', key: 'ctx' } as const, null, { shape: 'ctx-1' })
 
@@ -77,28 +77,69 @@ async function openPane($: EngineInterface, columns = DOCK_COLUMNS) {
 
 const isShown = async ($: EngineInterface) => (await $.ui.panes()).some(p => p.id === PANE && p.isPlaced)
 
-/** Closes the pane when a surface draws it, else opens it; says which. */
-async function toggle($: EngineInterface, columns?: number): Promise<'opened' | 'closed'> {
-  if (await isShown($)) {
-    await $.ui.close({ id: PANE })
-    await edit($, m => void (m.closed = true))
-    return 'closed'
-  }
+async function closePane($: EngineInterface) {
+  await $.ui.close({ id: PANE })
+  await edit($, m => void (m.closed = true))
+}
+
+async function reopenPane($: EngineInterface, columns?: number) {
   await edit($, m => void (m.closed = false))
   await openPane($, columns ? Math.ceil(columns * 0.45) : DOCK_COLUMNS)
+}
+
+/** Closes the pane when a surface draws it, else opens it with the monitor showing; says which. */
+async function toggle($: EngineInterface, columns?: number): Promise<'opened' | 'closed'> {
+  if (await isShown($)) {
+    await closePane($)
+    return 'closed'
+  }
+  await edit($, m => void (m.monitorClosed = false))
+  await reopenPane($, columns)
   return 'opened'
 }
 
-/** Hides the subagents half of the pane when it shows, else shows it (opening the pane if closed). */
-async function toggleAgents($: EngineInterface, columns?: number) {
+/**
+ * Hides one half of the pane (the monitor or the subagents) when it shows, closing the pane when the other
+ * half has nothing to show; else shows it, opening the pane if closed.
+ */
+async function toggleHalf($: EngineInterface, half: 'monitorClosed' | 'agentsClosed', columns?: number) {
   const shown = await isShown($)
-  if (shown && !(await read($, data)).agentsClosed) {
-    await edit($, m => void (m.agentsClosed = true))
+  const m = await read($, data)
+  if (shown && !m[half]) {
+    const other = half === 'monitorClosed' ? !m.agentsClosed && m.order.length > 1 : !m.monitorClosed
+    await edit($, n => void (n[half] = true))
+    if (!other) await closePane($)
   } else {
-    await edit($, m => void (m.agentsClosed = false))
-    if (!shown) await toggle($, columns)
+    await edit($, n => void (n[half] = false))
+    if (!shown) await reopenPane($, columns)
   }
   $.ui.invalidate('ui.render')
+}
+
+/** How a background agent's task ends by its agent's engine status; undefined while it still runs. */
+const endOf = (a: AgentInfo | undefined): Task['state'] | undefined =>
+  !a || a.status === 'completed' || (a.status === 'idle' && !a.teammateId) ? 'done'
+  : a.status === 'failed' ? 'fail'
+  : a.status === 'killed' ? 'stop'
+  : undefined
+
+/** Ends the background agent tasks whose agent has ended: SubagentStop and task notifications do not always arrive. */
+async function settleAgents($: EngineInterface) {
+  const { tasks } = await read($, data)
+  if (!tasks.some(t => t.kind === 'agent' && t.state === 'run')) return
+  const [agents, now] = await Promise.all([$.agent.list(), $.clock.now()])
+  const byId = new Map(agents.map(a => [a.id, a]))
+  const ended = (t: Task) => (t.kind === 'agent' && t.state === 'run' ? endOf(byId.get(t.id)) : undefined)
+  if (!tasks.some(ended)) return
+  await edit($, m => {
+    for (const t of m.tasks) {
+      const st = ended(t)
+      if (!st) continue
+      t.state = st
+      t.end = now
+      t.note = m.owners[t.id]?.report ?? t.note
+    }
+  })
 }
 
 export const register: Register = on => {
@@ -106,6 +147,7 @@ export const register: Register = on => {
     await $.command.register({ name: 'monitor', description: 'Open or close the session monitor pane', immediate: true })
     $.clock.every(1000, () => {
       tick++
+      void settleAgents($).catch(() => undefined)
       $.ui.invalidate('ui.render')
     })
     const m = await read($, data)
@@ -298,7 +340,7 @@ export const register: Register = on => {
     ])
     const home = (await $.env.get('HOME')) ?? ''
     const pane = drawPane(els, {
-      m, cx, usage, agents, now, cwd, home, sid, tick, width: e.props.bodyColumns, rows: e.props.scroll.bodyRows, offset: agentsOff, showAgents: !m.agentsClosed,
+      m, cx, usage, agents, now, cwd, home, sid, tick, width: e.props.bodyColumns, rows: e.props.scroll.bodyRows, offset: agentsOff, showMonitor: !m.monitorClosed, showAgents: !m.agentsClosed,
     })
     agentsBox = pane.agents
     agentsMax = pane.max
@@ -324,7 +366,9 @@ export const register: Register = on => {
     const els = $.ui.resolve(e)
     const [m, cx, usage, agents, now, shown] = await Promise.all([read($, data), read($, ctx), $.session.usage(), $.agent.list(), $.clock.now(), isShown($)])
     const columns = e.viewport?.columns
-    const agentsShown = shown && !m.agentsClosed
-    return drawBand(els, { m, cx, usage, agents, now, shown, agentsShown, tick, width: e.props.bodyColumns, onToggle: () => void toggle($, columns), onToggleAgents: () => void toggleAgents($, columns) })
+    return drawBand(els, {
+      m, cx, usage, agents, now, shown: shown && !m.monitorClosed, agentsShown: shown && !m.agentsClosed, tick, width: e.props.bodyColumns,
+      onToggle: () => void toggleHalf($, 'monitorClosed', columns), onToggleAgents: () => void toggleHalf($, 'agentsClosed', columns),
+    })
   })
 }

@@ -382,10 +382,10 @@ export type AgentsBox = { column: number; row: number; width: number; height: nu
 const SPLIT_COLUMNS = 100
 
 /**
- * The monitor pane: the monitor alone, or the monitor and the subagents in two equal halves: subagents left
+ * The monitor pane: the monitor alone, the subagents alone, or both in two equal halves: subagents left
  * and monitor right when wide, monitor on top when narrow. The monitor fits its half; the subagents scroll from `offset`.
  */
-export function drawPane(els: Els, I: Input & { rows: number; offset: number; showAgents: boolean }): { el: RenderChildren; agents?: AgentsBox; max: number } {
+export function drawPane(els: Els, I: Input & { rows: number; offset: number; showMonitor: boolean; showAgents: boolean }): { el: RenderChildren; agents?: AgentsBox; max: number } {
   const { m } = I
   const subs = m.order.slice(1).map(id => m.owners[id]!).filter(Boolean)
   if (!I.showAgents || subs.length === 0) return { el: drawMonitor(els, I), max: 0 }
@@ -393,8 +393,8 @@ export function drawPane(els: Els, I: Input & { rows: number; offset: number; sh
   const W = Math.max(30, I.width)
   const wide = W >= SPLIT_COLUMNS
   const half = wide ? Math.floor(W / 2) : Math.floor(I.rows / 2)
-  const box: AgentsBox = wide
-    ? { column: 0, row: 0, width: half, height: I.rows }
+  const box: AgentsBox = !I.showMonitor ? { column: 0, row: 0, width: W, height: I.rows }
+    : wide ? { column: 0, row: 0, width: half, height: I.rows }
     : { column: 0, row: half, width: W, height: Math.max(1, I.rows - half) }
   const monW = wide ? W - half : W
   const monRows = wide ? I.rows : half
@@ -410,7 +410,7 @@ export function drawPane(els: Els, I: Input & { rows: number; offset: number; sh
     max: flow.max,
     el: (
       <Box flexDirection={wide ? 'row-reverse' : 'column'} width={W}>
-        <Box width={monW} height={monRows} overflow="hidden">{drawMonitor(els, { ...I, width: monW, rows: monRows })}</Box>
+        {I.showMonitor && <Box width={monW} height={monRows} overflow="hidden">{drawMonitor(els, { ...I, width: monW, rows: monRows })}</Box>}
         <Box width={box.width} height={box.height} paddingX={1}>{flow.el}</Box>
       </Box>
     ),

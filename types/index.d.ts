@@ -57,6 +57,7 @@ export type Mon = {
   samples: [number, number][]
   working: boolean
   closed: boolean
+  monitorClosed: boolean
   agentsClosed: boolean
 }
 

@@ -23,8 +23,8 @@ const USAGE = {
 }
 
 /** Stands in for the engine beneath the mod. */
-function engine(on: On, { usage = USAGE as object, agents = true, panes = true } = {}) {
-  mock.clock(on, { now: USAGE.startedAt + 60_000 })
+function engine(on: On, { usage = USAGE as object, agents = true as boolean | (() => object[]), panes = true } = {}) {
+  const clock = mock.clock(on, { now: USAGE.startedAt + 60_000 })
   on('command.register', () => ({ value: { command: 'monitor' } }))
   if (panes) {
     on('ui.open', () => ({ value: { isPlaced: true } }))
@@ -36,7 +36,7 @@ function engine(on: On, { usage = USAGE as object, agents = true, panes = true }
   on('session.cwd', () => ({ value: '/Users/me/shop' }))
   on('session.id', () => ({ value: 'abcdef1234567890' }))
   on('env.get', () => ({ value: '/Users/me' }))
-  on('agent.list', () => ({ value: agents ? [{ id: 'ag1', description: 'review code', type: 'Explore', status: 'running' as const }] : [] }))
+  on('agent.list', () => ({ value: (typeof agents === 'function' ? agents() : agents ? [{ id: 'ag1', description: 'review code', type: 'Explore', status: 'running' }] : []) as never }))
   on('tool.call', () => ({ result: {} }))
   let spawned = 0
   on('agent.spawn', () => ({ model: 'claude-haiku-5-5', agentId: 'ag' + ++spawned }))
@@ -46,6 +46,7 @@ function engine(on: On, { usage = USAGE as object, agents = true, panes = true }
       usage: { model: 'claude-opus-5-5', input_tokens: 2000, output_tokens: 1000, cache_read_input_tokens: 50_000, cache_creation_input_tokens: 0 },
     }
   })
+  return clock
 }
 
 test('the pane shows the bill, context, agents and log on every surface', async ($, on) => {
@@ -249,4 +250,52 @@ test('the wheel over the subagents scrolls them alone; over the monitor it moves
   expect(await draw()).toEqual({ top: false, shop: true })
   await wheel(10, -5)
   expect(await draw()).toEqual({ top: true, shop: true })
+})
+
+test('a background agent task ends when the engine lists its agent as ended, without a SubagentStop', async ($, on) => {
+  let status = 'running'
+  const clock = engine(on, { agents: () => [{ id: 'ag1', description: 'audit', type: 'Explore', status }] })
+  await $.session.start({ cwd: '/Users/me/shop', surface: 'terminal', isInteractive: true })
+  await $.agent.spawn({ tool_use_id: 'tu1', prompt: 'p', description: 'audit', subagentType: 'Explore', provider: { plugin: 'engine' }, parentModel: 'claude-opus-5-5', background: true, fork: false } as never)
+  const tasks = async () => {
+    const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 80 } })
+    const t = (await ui.find({ type: 'Text', text: /^\d+ running$/ }))?.text
+    await ui.unmount()
+    return t
+  }
+  expect(await tasks()).toBe('1 running')
+  status = 'completed'
+  await clock.advance(1000)
+  expect(await tasks()).toBe('0 running')
+})
+
+test('the band hides the monitor half alone, leaving the subagents in the pane', async ($, on) => {
+  engine(on, { panes: false })
+  let open = false
+  on('ui.open', () => ((open = true), { value: { isPlaced: true } }))
+  on('ui.close', () => ((open = false), { value: undefined }))
+  on('ui.panes', () => ({ value: open ? [{ id: 'session-monitor', title: 'Monitor', isShown: true, isFocused: false, isPlaced: true }] : [] }))
+  await $.session.start({ cwd: '/Users/me/shop', surface: 'terminal', isInteractive: true })
+  await $.agent.spawn({ tool_use_id: 'tu1', prompt: 'p', description: 'job 1', subagentType: 'Explore', provider: { plugin: 'engine' }, parentModel: 'claude-opus-5-5', background: false, fork: false } as never)
+  const pane = async () => {
+    const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 120 } })
+    const r = { job: !!(await ui.find({ type: 'Text', text: /job 1/ })), shop: !!(await ui.find({ type: 'Text', text: /^shop$/ })) }
+    await ui.unmount()
+    return r
+  }
+  const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  await band.press({ key: 'toggle' })
+  expect(open).toBe(true)
+  expect(await pane()).toEqual({ job: true, shop: false })
+  expect((await band.find({ key: 'toggle' }))?.text).toMatch(/Show monitor/)
+  expect((await band.find({ key: 'agents' }))?.text).toMatch(/Hide agents/)
+  await band.press({ key: 'toggle' })
+  expect(await pane()).toEqual({ job: true, shop: true })
+  await band.press({ key: 'toggle' })
+  await band.press({ key: 'agents' })
+  expect(open).toBe(false)
+  await band.press({ key: 'agents' })
+  expect(open).toBe(true)
+  expect(await pane()).toEqual({ job: true, shop: false })
+  await band.unmount()
 })
