@@ -174,7 +174,7 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
   const header = (
     <Box flexDirection="row" justifyContent="space-between" columnGap={1}>
       <Box flexDirection="row" columnGap={1}>
-        {active ? pill('● LIVE', C.green) : pill('IDLE', IDLE_BG)}
+        {state !== 'idle' ? pill('● LIVE', C.green) : pill('IDLE', IDLE_BG)}
         {line([fit(parent, Math.max(0, W - project.length - 30)), C.gray], [project, C.orange, 'b'])}
       </Box>
       {line([I.sid.slice(0, 8) + '  ', C.dark], [hhmmss(now), C.gray])}

@@ -10,7 +10,7 @@
 ### Changed
 
 - The pane is compact and every figure shows once: the cost total, cache hit rate, model and rates, context size and agent counts no longer repeat across panels.
-- The header is one line: state, path with the project highlighted, session and clock.
+- The header is one line: state, path with the project highlighted, session and clock. Its LIVE / IDLE pill follows the main session's state, so it no longer says LIVE for 15 seconds after a turn ends.
 - The four token cards are rows in the **Cost** panel; the main / agents split shows only when there are agents.
 - In **Context**, memory files nest under their category and the deferred MCP tool count joins its row.
 - Empty agent and task panels collapse into one line; the timeline shows only once there are agents.

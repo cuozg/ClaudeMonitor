@@ -74,6 +74,16 @@ test('an empty session draws without data', async ($, on) => {
   await ui.unmount()
 })
 
+test('the header pill follows the main state, not recent activity', async ($, on) => {
+  engine(on, { agents: false })
+  await $.session.start({ cwd: '/Users/me/shop', surface: 'terminal', isInteractive: true })
+  await $.tool.call({ tool: 'Read', file_path: '/Users/me/shop/cart.ts' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ type: 'Text', text: /IDLE/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /LIVE/ })).toBeUndefined()
+  await ui.unmount()
+})
+
 test('what needs attention is highlighted in the pane and the band', async ($, on) => {
   engine(on, { usage: { ...USAGE, rateLimits: [{ kind: 'five_hour', percentUsed: 92 }] }, agents: false, panes: false })
   on('ui.panes', () => ({ value: [] }))
