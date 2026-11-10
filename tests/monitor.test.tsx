@@ -70,7 +70,7 @@ test('an empty session draws without data', async ($, on) => {
   engine(on, { usage: { ...USAGE, cost: undefined, rateLimits: [] }, agents: false })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 40 } })
   expect(await ui.find({ type: 'Text', text: /no subagents spawned yet/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /IDLE/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Idle/ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -79,8 +79,8 @@ test('the header pill follows the main state, not recent activity', async ($, on
   await $.session.start({ cwd: '/Users/me/shop', surface: 'terminal', isInteractive: true })
   await $.tool.call({ tool: 'Read', file_path: '/Users/me/shop/cart.ts' })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect(await ui.find({ type: 'Text', text: /IDLE/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /LIVE/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /Idle/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Working/ })).toBeUndefined()
   await ui.unmount()
 })
 
@@ -88,7 +88,7 @@ test('what needs attention is highlighted in the pane and the band', async ($, o
   engine(on, { usage: { ...USAGE, rateLimits: [{ kind: 'five_hour', percentUsed: 92 }] }, agents: false, panes: false })
   on('ui.panes', () => ({ value: [] }))
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect(await pane.find({ type: 'Text', text: /NEEDS ATTENTION/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /Needs attention/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /5h limit at 92%/ })).toBeDefined()
   await pane.unmount()
   const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
@@ -99,7 +99,7 @@ test('what needs attention is highlighted in the pane and the band', async ($, o
 test('a calm session shows no attention box', async ($, on) => {
   engine(on, { agents: false })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect(await ui.find({ type: 'Text', text: /NEEDS ATTENTION/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /Needs attention/ })).toBeUndefined()
   await ui.unmount()
 })
 
