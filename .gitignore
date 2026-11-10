@@ -1,5 +1,5 @@
-__pycache__/
-*.pyc
 .DS_Store
 .claude-plugin/types/
 tsconfig.json
+.claude
+_temp

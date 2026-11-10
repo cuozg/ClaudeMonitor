@@ -62,7 +62,6 @@ Or load a clone directly in every session (CLI, Desktop and VS Code), by adding 
 | `types/index.d.ts` | The state the mod keeps |
 | `tests/` | `claude plugin test .` |
 | `CHANGELOG.md` | What changed in each version |
-| `_v1/` | The previous Python + tmux + VSCode-extension monitor (1.0.0), kept as a backup, with its preview image |
 
 ## Changelog
 
