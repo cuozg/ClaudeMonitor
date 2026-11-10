@@ -23,7 +23,7 @@ const USAGE = {
 }
 
 /** Stands in for the engine beneath the mod. */
-function engine(on: On, { usage = USAGE as object, agents = true as boolean | (() => object[]), panes = true } = {}) {
+function engine(on: On, { usage = USAGE as object, agents = true as boolean | (() => object[]), panes = true, toolResult = {} as object } = {}) {
   const clock = mock.clock(on, { now: USAGE.startedAt + 60_000 })
   on('command.register', () => ({ value: { command: 'monitor' } }))
   if (panes) {
@@ -35,9 +35,9 @@ function engine(on: On, { usage = USAGE as object, agents = true as boolean | ((
   on('session.surfaces', () => ({ value: ['terminal'] as const }))
   on('session.cwd', () => ({ value: '/Users/me/shop' }))
   on('session.id', () => ({ value: 'abcdef1234567890' }))
-  on('env.get', () => ({ value: '/Users/me' }))
+  on('env.get', (_, e) => ({ value: e.name === 'HOME' ? '/Users/me' : undefined }))
   on('agent.list', () => ({ value: (typeof agents === 'function' ? agents() : agents ? [{ id: 'ag1', description: 'review code', type: 'Explore', status: 'running' }] : []) as never }))
-  on('tool.call', () => ({ result: {} }))
+  on('tool.call', () => ({ result: toolResult }))
   let spawned = 0
   on('agent.spawn', () => ({ model: 'claude-haiku-5-5', agentId: 'ag' + ++spawned }))
   on('turn.step', async function* (_, e) {
@@ -300,4 +300,33 @@ test('the band hides the monitor half alone, leaving the subagents in the pane',
   expect(open).toBe(true)
   expect(await pane()).toEqual({ job: true, shop: false })
   await band.unmount()
+})
+
+test('a Monitor section lists the monitor, and a turn end without it in flight gives it the green tick', async ($, on) => {
+  engine(on, { toolResult: { taskId: 'mon1' } })
+  on('classic.Stop', () => ({}))
+  await $.session.start({ cwd: '/Users/me/shop', surface: 'terminal', isInteractive: true })
+  await $.tool.call({ tool: 'Monitor', description: 'watch deploy', command: 'tail -f log' } as never)
+  const draw = async () => {
+    const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 80 } })
+    const out = { section: !!(await ui.find({ type: 'Text', text: /^Monitor/ })), tick: !!(await ui.find({ type: 'Text', text: /^✓/ })) }
+    await ui.unmount()
+    return out
+  }
+  expect(await draw()).toEqual({ section: true, tick: false })
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [] } as never)
+  expect(await draw()).toEqual({ section: true, tick: true })
+})
+
+test('the pane names the API provider and the skills, plugins and MCP servers that were used', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: '/Users/me/shop', surface: 'terminal', isInteractive: true })
+  await $.tool.call({ tool: 'Skill', skill: 'unity:unity-cli' } as never)
+  await $.tool.call({ tool: 'mcp__analytics-mcp__run_report' } as never)
+  for await (const _ of $.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 })) void _
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const text = JSON.stringify(await ui.drawn())
+  await ui.unmount()
+  expect(text).toContain('Anthropic API')
+  for (const name of ['Skills', 'Plugins', 'MCP', '/unity:unity-', 'analytics-mcp']) expect(text).toContain(name)
 })

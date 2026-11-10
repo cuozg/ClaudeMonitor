@@ -8,7 +8,7 @@ import {
   prettyModel, sumTok, vlen, zero, addTok,
 } from './lib'
 
-type Els = Pick<Elements['terminal'], 'Box' | 'Text'>
+type Els = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
 type Input = {
   m: Mon
   cx: CtxView | null
@@ -17,6 +17,7 @@ type Input = {
   now: number
   cwd: string
   home: string
+  provider: string
   sid: string
   tick: number
   width: number
@@ -59,6 +60,7 @@ function billOf(m: Mon, usage: SessionUsage) {
 }
 
 /** Dollars per hour over the last ten minutes. */
+const CACHE_TTL_MS = 300_000 // prompt cache lifetime, refreshed by each request
 const burnOf = (m: Mon, now: number, k: number) => m.samples.filter(([ts]) => ts >= now - 600_000).reduce((s, [, v]) => s + v, 0) * 6 * k
 
 /** What needs a person's attention now, most urgent first. */
@@ -176,6 +178,7 @@ export function drawMonitor({ Box, Text }: Els, I: Input & { rows?: number }) {
   const doing = flight && state === 'working' ? fit(flight.desc, Math.max(10, iw - 24)) + ' ' + fmtDur(now - flight.ts) : ''
   const header = (
     <Box flexDirection="column">
+      {line(['API ', C.dark], [I.provider, C.light, 'b'])}
       <Box flexDirection="row" justifyContent="space-between" columnGap={1}>
         {line(stateSeg, ['  ', undefined], [project, undefined, 'b'])}
         {line(['session ', C.dark], [fmtDur(t1 - t0), C.light])}
@@ -202,6 +205,7 @@ export function drawMonitor({ Box, Text }: Els, I: Input & { rows?: number }) {
   const totUsd = sumTok(usd) || 1
   const kinds = [['in', 'Input', C.orange], ['cw', 'Cache write', C.pink], ['cr', 'Cache read', C.blue], ['out', 'Output', C.gold]] as const
   const saved = nocache > 0 ? Math.max(0, 1 - exact / nocache) * 100 : 0
+  const cacheLeft = main.last ? main.last + CACHE_TTL_MS - now : 0
   const burnCol = burn > 20 ? C.red : burn > 5 ? C.gold : C.light
   const lbw = Math.max(4, side - 23)
   const limits = usage.rateLimits.map(l => {
@@ -224,6 +228,12 @@ export function drawMonitor({ Box, Text }: Els, I: Input & { rows?: number }) {
       side,
     ),
     line(['burn ', C.gray], [fmtCost(burn) + '/h', burnCol, 'b']),
+    cacheLeft > 0
+      ? line(['cache ttl ', C.gray], [fmtDur(cacheLeft), cacheLeft < 60_000 ? C.gold : C.green, 'b'])
+      : line(['cache ttl ', C.gray], ['expired', C.dark], ctxTok > 0 && [' · next turn re-caches ', C.gray], ctxTok > 0 && ['~' + fmtTok(ctxTok), C.gold, 'b']),
+    !!m.recache && line(
+      ['re-cached ', C.gray], [fmtTok(m.recache.tok), C.light, 'b'], [` · ${fmtDur(now - m.recache.ts)} ago`, C.dark], [m.recache.n > 1 ? ` · ${m.recache.n} misses` : '', C.dark],
+    ),
     ...limits,
   ]
   const bill = section('Cost', [[fmtCost(exact), ACCENT, 'b']], billBody, side)
@@ -256,6 +266,54 @@ export function drawMonitor({ Box, Text }: Els, I: Input & { rows?: number }) {
   ]
   const context = section('Context', [[pct.toFixed(0) + '%', pctCol, 'b'], [` · ${fmtTok(ctxTok)} / ${fmtTok(lim)}`, C.dark]], contextBody, sideR)
 
+  // ── Skills, plugins and MCP: tokens and cost of the requests that followed each one's use (main and subagents) ──
+  const useBox = (title: string, kind: 'skill' | 'plugin' | 'mcp', prefix = '') => {
+    const list = Object.entries(m.uses?.[kind] ?? {}).sort((a, b) => b[1].usd - a[1].usd)
+    if (list.length === 0) return null
+    const nameW = Math.max(8, iw - 2 - 7 - 9 - 2)
+    const rows = list.slice(0, 8).map(([name, u]) => line(
+      ['● ', ACCENT], [fit(prefix + name, nameW).padEnd(nameW), C.light], [fmtTok(u.tok).padStart(7), C.gray], [fmtCost(u.usd * k).padStart(10), C.light],
+    ))
+    if (list.length > 8) rows.push(line([`  +${list.length - 8} more`, C.dark]))
+    const total = list.reduce((s, [, u]) => s + u.usd, 0) * k
+    return { rows: rows.length, el: section(title, [[`${list.length} · `, C.gray], [fmtCost(total), C.light]], rows) }
+  }
+  const useBoxes = [useBox('Skills', 'skill', '/'), useBox('Plugins', 'plugin'), useBox('MCP', 'mcp')].filter((x): x is NonNullable<typeof x> => !!x)
+  const useRows = useBoxes.reduce((n, b) => n + 1 + 1 + b.rows, 0)
+
+  // ── Token: main and each subagent, biggest first ───────────────────────────
+  const totalTok = sumTok(tok) || 1
+  const TOKEN_MAX = 8
+  const byTok = all.map(o => ({ o, n: sumTok(o.tok) })).sort((x, y) => y.n - x.n)
+  const tokShown = byTok.slice(0, TOKEN_MAX)
+  const tokRest = byTok.slice(TOKEN_MAX)
+  const tlw = Math.max(8, Math.min(22, Math.floor(iw / 4))) // shared by the Token and Model rows so their columns line up
+  const tbw = Math.max(4, iw - 2 - tlw - 1 - 7 - 5 - 9 - 1)
+  const tokenBody = [
+    ...tokShown.map(({ o, n }) => {
+      const col = colorOf(o)
+      const [on, off] = bar(n / totalTok, tbw)
+      return line(
+        ['● ', col], [fit(o.id === 'main' ? 'main' : o.label, tlw).padEnd(tlw) + ' ', C.light], [on, col], [off, C.track],
+        [fmtTok(n).padStart(7), C.gray], [(((n / totalTok) * 100).toFixed(0) + '%').padStart(5), C.dark], [fmtCost(cost(o)).padStart(9), C.light],
+      )
+    }),
+    tokRest.length > 0 && line([`  +${tokRest.length} more · ${fmtTok(tokRest.reduce((t, x) => t + x.n, 0))}`, C.dark]),
+  ]
+  const tokenBox = section('Token', [[fmtTok(sumTok(tok)), C.gray]], tokenBody)
+
+  // ── Model: this session's spend per model, biggest first ───────────────────
+  const byModel = Object.entries(m.models ?? {}).map(([id, v]) => ({ id, n: sumTok(v.tok), usd: sumTok(v.usd) * k })).sort((x, y) => y.n - x.n)
+  const modelTot = byModel.reduce((t, x) => t + x.n, 0) || 1
+  const mlw = tlw
+  const mbw = tbw
+  const modelBody = byModel.slice(0, 6).map(x => {
+    const col = modelColor(x.id)
+    const [on, off] = bar(x.n / modelTot, mbw)
+    return line(['● ', col], [fit(prettyModel(x.id), mlw).padEnd(mlw) + ' ', C.light], [on, col], [off, C.track], [fmtTok(x.n).padStart(7), C.gray], [(((x.n / modelTot) * 100).toFixed(0) + '%').padStart(5), C.dark], [fmtCost(x.usd).padStart(9), C.light])
+  })
+  const modelBox = byModel.length > 0 && section('Model', [[`${byModel.length} used`, C.gray]], modelBody)
+
   // ── Background tasks ───────────────────────────────────────────────────────
   const ownerName = (id: string) => (id === 'main' ? 'main' : m.owners[id]?.label ?? id.slice(0, 6))
   const ownerCol = (id: string) => (id === 'main' ? mcol : m.owners[id] ? colorOf(m.owners[id]!) : C.gray)
@@ -265,31 +323,42 @@ export function drawMonitor({ Box, Text }: Els, I: Input & { rows?: number }) {
   const result = (t: Task): Seg =>
     t.state === 'run' ? (t.kind === 'monitor' ? [`${t.events} events`, C.cyan] : ['running', ACCENT])
     : t.state === 'fail' ? ['failed', C.red] : t.state === 'stop' ? ['stopped', C.gold] : ['done', C.dark]
-  const fails = m.tasks.filter(t => t.state === 'fail').length
+  const monTasks = m.tasks.filter(t => t.kind === 'monitor')
+  const bgTasks = m.tasks.filter(t => t.kind !== 'monitor')
+  const runMon = monTasks.filter(t => t.state === 'run').length
+  const runBg = bgTasks.filter(t => t.state === 'run').length
+  const fails = bgTasks.filter(t => t.state === 'fail').length
   const taskLines = (t: Task) => 1 + Number(t.state === 'run' && !!t.note)
   /** The pane never scrolls: tasks shrink to the rows left under the fixed blocks. */
   const rowsOf = (body: unknown[]) => body.filter(Boolean).length
   // header, then each block under a one-row gap; the cost and context blocks sit side by side when wide
   const topRows = 1 + (side < iw ? Math.max(rowsOf(billBody), rowsOf(contextBody)) : rowsOf(billBody) + 1 + rowsOf(contextBody) + 1)
-  const fixedRows = 2 + (doing ? 1 : 0) + (attentionBox ? 1 + alerts.length + 1 : 0) + 1 + topRows
-  let taskN = Math.min(8, m.tasks.length)
+  const fixedRows = 3 + useRows + (doing ? 1 : 0) + (attentionBox ? 1 + alerts.length + 1 : 0) + 1 + topRows + 1 + 1 + rowsOf(tokenBody) + (modelBox ? 1 + 1 + rowsOf(modelBody) : 0)
+  const secRows = (list: Task[], n: number) => (n > 0 ? 2 + list.slice(0, n).reduce((s, t) => s + taskLines(t), 0) + Number(list.length > n) : 0)
+  let monN = Math.min(4, monTasks.length)
+  let bgN = Math.min(8, bgTasks.length)
   if (I.rows && I.rows > 0) {
-    const spare = (n: number) => I.rows! - fixedRows - (n > 0 ? 2 + m.tasks.slice(0, n).reduce((s, t) => s + taskLines(t), 0) + Number(m.tasks.length > n) : 0)
-    while (taskN > 0 && spare(taskN) < 0) taskN--
+    while (monN + bgN > 0 && fixedRows + secRows(monTasks, monN) + secRows(bgTasks, bgN) > I.rows) {
+      if (bgN > 0) bgN--
+      else monN--
+    }
   }
-  const shownTasks = m.tasks.slice(0, taskN)
-  const tasksBox = taskN > 0 && section('Background tasks', [
-    [`${runTasks} running`, runTasks ? ACCENT : C.gray], [` · ${m.tasks.length - runTasks} finished`, C.gray], [fails ? ` · ${fails} failed` : '', C.red],
-  ], [
-    ...shownTasks.flatMap(t => [
+  const taskRows = (list: Task[], n: number) => [
+    ...list.slice(0, n).flatMap(t => [
       line(
-        icon(t), [' ' + fit((t.kind === 'monitor' ? '⌁ ' : '') + t.desc, descW).padEnd(descW) + ' ', t.state === 'fail' ? C.red : t.state === 'run' ? undefined : C.gray],
+        icon(t), [' ' + fit(t.desc, descW).padEnd(descW) + ' ', t.state === 'fail' ? C.red : t.state === 'run' ? undefined : C.gray],
         [fit(ownerName(t.owner), ownW).padEnd(ownW), ownerCol(t.owner)], [fmtDur((t.end || now) - t.start).padStart(10), C.dark], [' ' + result(t)[0].padStart(12), result(t)[1]],
       ),
       t.state === 'run' && !!t.note && line(['  └ ', C.track], [fit(t.note, iw - 4), C.dark]),
     ]),
-    m.tasks.length > shownTasks.length && line([`  +${m.tasks.length - shownTasks.length} older`, C.dark]),
-  ])
+    list.length > n && line([`  +${list.length - n} older`, C.dark]),
+  ]
+  const monitorBox = monN > 0 && section('Monitor', [
+    [`${runMon} running`, runMon ? ACCENT : C.gray], [` · ${monTasks.length - runMon} finished`, C.gray],
+  ], taskRows(monTasks, monN))
+  const tasksBox = bgN > 0 && section('Background tasks', [
+    [`${runBg} running`, runBg ? ACCENT : C.gray], [` · ${bgTasks.length - runBg} finished`, C.gray], [fails ? ` · ${fails} failed` : '', C.red],
+  ], taskRows(bgTasks, bgN))
 
   return (
     <Box flexDirection="column" width={W} paddingX={1}>
@@ -301,6 +370,10 @@ export function drawMonitor({ Box, Text }: Els, I: Input & { rows?: number }) {
           {side < iw ? null : gap}
           {context}
         </Box>,
+        tokenBox,
+        modelBox,
+        ...useBoxes.map(b => b.el),
+        monitorBox,
         tasksBox,
       ].filter(Boolean).flatMap((block, i) => (i ? [gap, block] : [block]))}
     </Box>
@@ -372,7 +445,7 @@ const SPLIT_COLUMNS = 100
  * The monitor pane: the monitor alone, the subagents alone, or both in two equal halves: subagents left
  * and monitor right when wide, monitor on top when narrow, with a line between them. The monitor fits its half; the subagents scroll from `offset`.
  */
-export function drawPane(els: Els, I: Input & { rows: number; offset: number; showMonitor: boolean; showAgents: boolean }): { el: RenderChildren; agents?: AgentsBox; max: number } {
+export function drawPane(els: Els, I: Input & { rows: number; offset: number; showMonitor: boolean; showAgents: boolean; onToggleAgent: (id: string) => void }): { el: RenderChildren; agents?: AgentsBox; max: number } {
   const { m } = I
   const subs = m.order.slice(1).map(id => m.owners[id]!).filter(Boolean)
   if (!I.showAgents || subs.length === 0) return { el: drawMonitor(els, I), max: 0 }
@@ -389,6 +462,7 @@ export function drawPane(els: Els, I: Input & { rows: number; offset: number; sh
   const { k } = billOf(m, I.usage)
   const flow = drawFlow(els, {
     agents: subs, states, now: I.now, tick: I.tick, width: box.width - 2, height: box.height, offset: I.offset,
+    expanded: new Set(m.expanded ?? []), onToggle: I.onToggleAgent,
     colorOf: o => LANE[(subs.indexOf(o) + 1) % LANE.length]!, cost: o => sumTok(o.usd) * k,
     window: I.cx?.window ?? I.usage.context.window,
   })

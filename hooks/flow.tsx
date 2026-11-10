@@ -4,7 +4,7 @@ import type { Elements } from 'claude-code'
 import type { Owner } from '../types'
 import { C, SPIN, fit, fmtCost, fmtTok, modelColor, prettyModel, vlen } from './lib'
 
-type Els = Pick<Elements['terminal'], 'Box' | 'Text'>
+type Els = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
 type Seg = [string, string?, ('b' | 'd' | 'i')?]
 export type FlowInput = {
   agents: Owner[]
@@ -18,6 +18,9 @@ export type FlowInput = {
   height: number
   /** The first row shown: the column scrolls on its own, clamped to its rows. */
   offset: number
+  /** Finished agents the user opened; the others show only their header. */
+  expanded: Set<string>
+  onToggle: (id: string) => void
 }
 
 const ACCENT = '#d97757'
@@ -36,11 +39,11 @@ const mmss = (ms: number) => {
 }
 const textW = (segs: Seg[]) => segs.reduce((n, s) => n + vlen(s[0]), 0)
 
-export function drawFlow({ Box, Text }: Els, I: FlowInput) {
+export function drawFlow({ Box, Text, Button }: Els, I: FlowInput) {
   const { agents, states, now, tick } = I
   const spin = SPIN[tick % SPIN.length]!
 
-  const row = (o: Owner) => {
+  const row = (o: Owner, pad = 0) => {
     const s = states.get(o.id) ?? 'run'
     const live = s === 'run' || s === 'stall'
     const [ic, icol] = s === 'run' ? [spin, ACCENT] : DOT[s] ?? DOT.done!
@@ -54,7 +57,7 @@ export function drawFlow({ Box, Text }: Els, I: FlowInput) {
       [fmtCost(I.cost(o)).padStart(8), C.light, 'b'],
       [' ' + mmss((live ? now : o.last) - (o.first || now)), C.dark],
     ]
-    const lw = Math.max(4, I.width - 2 - textW(right) - 1)
+    const lw = Math.max(4, I.width - 2 - pad - textW(right) - 1)
     const segs: Seg[] = [[ic + ' ', icol], [fit(o.label, lw).padEnd(lw), I.colorOf(o), 'b'], [' '], ...right]
     return (
       <Text mono wrap="truncate-end">
@@ -85,9 +88,20 @@ export function drawFlow({ Box, Text }: Els, I: FlowInput) {
   const section = (o: Owner) => {
     const s = states.get(o.id) ?? 'run'
     const live = s === 'run' || s === 'stall'
+    if (live) return [...head(o), ...body(o, live)]
+    const open = I.expanded.has(o.id)
+    const header = (
+      <Box flexDirection="row" width={I.width}>
+        <Button key={o.id} label={open ? '▾' : '▸'} onPress={() => I.onToggle(o.id)} />
+        {row(o, 4)}
+      </Box>
+    )
+    return open ? [header, ...body(o, live)] : [header]
+  }
+  const head = (o: Owner) => [row(o)]
+  const body = (o: Owner, live: boolean) => {
     const report = !live && o.report ? 1 : 0
     return [
-      row(o),
       ...o.steps.slice(-(STEPS - report)).map(st => stepLine(o, st, live)),
       ...(report ? [
         <Text mono wrap="truncate-end">

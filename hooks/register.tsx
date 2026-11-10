@@ -4,7 +4,7 @@ import { atom, read, update } from 'claude-code'
 import type { AgentInfo, EngineInterface, Register } from 'claude-code'
 
 import type { CtxView, Mon, Owner, Task } from '../types'
-import { addTok, describeTool, firstLine, lineDelta, newOwner, price, summaryLine, taskNotes } from './lib'
+import { addTok, zero, describeTool, firstLine, lineDelta, newOwner, price, sourcesOf, sumTok, summaryLine, taskNotes } from './lib'
 import { drawBand, drawPane, type AgentsBox } from './view'
 
 const PANE = 'session-monitor'
@@ -184,7 +184,7 @@ export const register: Register = on => {
           const s = n.status.toLowerCase()
           if (/completed|success/.test(s) || /stream ended/.test(n.summary)) t.state = 'done'
           else if (/fail|error/.test(s)) t.state = 'fail'
-          else if (/kill|stop|cancel/.test(s)) t.state = 'stop'
+          else if (/kill|stop|cancel|time/.test(s)) t.state = 'stop'
           if (t.state !== 'run' && !t.end) t.end = now
         }
       })
@@ -243,6 +243,20 @@ export const register: Register = on => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
+  // A turn's end lists the background work still in flight: any task the monitor thinks runs but is not listed has ended.
+  on('classic.Stop', async ($, e, next) => {
+    const live = new Set((e.background_tasks ?? []).map(t => t.id))
+    const now = await $.clock.now()
+    await edit($, m => {
+      for (const t of m.tasks) {
+        if (t.state !== 'run' || t.kind === 'agent' || live.has(t.id)) continue
+        t.state = 'done'
+        t.end = now
+      }
+    })
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
   on('turn.step', async function* ($, e, next) {
     const r = yield* next(e)
     if (r.usage) {
@@ -257,7 +271,25 @@ export const register: Register = on => {
         o.tok = addTok(o.tok, p.tok)
         o.usd = addTok(o.usd, p.usd)
         o.nocache += p.nocache
+        const md = ((m.models ??= {})[u.model || 'unknown'] ??= { tok: zero(), usd: zero() })
+        md.tok = addTok(md.tok, p.tok)
+        md.usd = addTok(md.usd, p.usd)
+        if (!e.agentId && o.ctx > 0 && p.tok.cw >= 20_000 && p.tok.cw > p.tok.cr) {
+          m.recache = { ts: now, tok: p.tok.cw, n: (m.recache?.n ?? 0) + 1 }
+        }
         o.ctx = p.tok.in + p.tok.cr + p.tok.cw
+        const pend = m.pend?.[o.id]
+        for (const kind of ['skill', 'plugin', 'mcp'] as const) {
+          const keys = pend?.[kind] ?? []
+          if (keys.length === 0) continue
+          const uses = ((m.uses ??= { skill: {}, plugin: {}, mcp: {} })[kind] ??= {})
+          for (const key of keys) {
+            const u = (uses[key] ??= { tok: 0, usd: 0 })
+            u.tok += sumTok(p.tok) / keys.length
+            u.usd += sumTok(p.usd) / keys.length
+          }
+          pend![kind] = []
+        }
         seen(o, now)
         push(o.act, now, MAX_TS)
         push(m.samples, [now, p.usd.in + p.usd.cw + p.usd.cr + p.usd.out], 2000)
@@ -279,6 +311,13 @@ export const register: Register = on => {
     const start = await $.clock.now()
     await edit($, m => {
       const o = ownerOf(m, agentId)
+      const used = sourcesOf(tool, inp)
+      for (const kind of ['skill', 'plugin', 'mcp'] as const) {
+        const key = used[kind]
+        if (!key) continue
+        const list = (((m.pend ??= {})[o.id] ??= { skill: [], plugin: [], mcp: [] })[kind] ??= [])
+        if (!list.includes(key)) list.push(key)
+      }
       o.nTools++
       o.action = desc
       o.flights.push({ id, desc, ts: start })
@@ -329,8 +368,20 @@ export const register: Register = on => {
       $.session.id(),
     ])
     const home = (await $.env.get('HOME')) ?? ''
+    const flag = (v: string | undefined) => /^(1|true|yes)$/i.test(v ?? '')
+    const baseUrl = (await $.env.get('ANTHROPIC_BASE_URL')) ?? ''
+    const provider =
+      flag(await $.env.get('CLAUDE_CODE_USE_BEDROCK')) ? 'AWS Bedrock'
+      : flag(await $.env.get('CLAUDE_CODE_USE_VERTEX')) ? 'Google Vertex'
+      : flag(await $.env.get('CLAUDE_CODE_USE_FOUNDRY')) ? 'Azure Foundry'
+      : baseUrl ? 'Gateway · ' + (baseUrl.replace(/^\w+:\/\//, '').split('/')[0] ?? baseUrl)
+      : 'Anthropic API'
     const pane = drawPane(els, {
-      m, cx, usage, agents, now, cwd, home, sid, tick, width: e.props.bodyColumns, rows: e.props.scroll.bodyRows, offset: agentsOff, showMonitor: !m.monitorClosed, showAgents: !m.agentsClosed,
+      m, cx, usage, agents, now, cwd, home, provider, sid, tick, width: e.props.bodyColumns, rows: e.props.scroll.bodyRows, offset: agentsOff, showMonitor: !m.monitorClosed, showAgents: !m.agentsClosed,
+      onToggleAgent: id => void edit($, n => {
+        const l = n.expanded ?? []
+        n.expanded = l.includes(id) ? l.filter(x => x !== id) : [...l, id]
+      }).then(() => $.ui.invalidate('ui.render')),
     })
     agentsBox = pane.agents
     agentsMax = pane.max

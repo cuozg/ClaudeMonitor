@@ -208,3 +208,17 @@ export function taskNotes(text: string): { id: string; status: string; summary: 
     .map(b => ({ id: tag(b, 'task-id'), status: tag(b, 'status'), summary: tag(b, 'summary'), event: tag(b, 'event') }))
     .filter(n => n.id)
 }
+
+/** The skill, plugin and MCP server a tool call belongs to, if any. */
+export function sourcesOf(tool: string, inp: Record<string, unknown>): { skill?: string; plugin?: string; mcp?: string } {
+  if (tool === 'Skill' && inp.skill) {
+    const skill = String(inp.skill).replace(/^\//, '')
+    return { skill, plugin: skill.includes(':') ? skill.split(':')[0] : undefined }
+  }
+  if (tool.startsWith('mcp__')) {
+    const server = tool.split('__')[1] ?? ''
+    const plug = /^plugin_(.+?)_/.exec(server)?.[1]
+    return { mcp: plug ? server.replace(/^plugin_.+?_/, '') || server : server, plugin: plug }
+  }
+  return {}
+}

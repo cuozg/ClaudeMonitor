@@ -51,10 +51,20 @@ export type Mon = {
   order: string[]
   tasks: Task[]
   samples: [number, number][]
+  /** Tokens and dollars per model, whoever spent them. */
+  models?: Record<string, { tok: Tok; usd: Tok }>
   working: boolean
   closed: boolean
   monitorClosed: boolean
   agentsClosed: boolean
+  /** Finished subagents the user opened to review; the rest show only their header. */
+  expanded?: string[]
+  /** The main loop's last cache miss: when, and how many tokens it wrote again. */
+  recache?: { ts: number; tok: number; n: number }
+  /** Tokens and raw dollars of the requests that read each skill, plugin or MCP server's result, main and subagents together. */
+  uses?: Record<'skill' | 'plugin' | 'mcp', Record<string, { tok: number; usd: number }>>
+  /** Per owner: skills, plugins and MCP servers called since its last request; that request is charged to them. */
+  pend?: Record<string, Record<'skill' | 'plugin' | 'mcp', string[]>>
 }
 
 /** The context window broken down as /context does. */
