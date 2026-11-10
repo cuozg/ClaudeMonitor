@@ -26,6 +26,21 @@ const STEPS = 8
 const TAG: Record<string, string> = {
   read: C.blue, edit: C.orange, bash: C.green, search: C.purple, web: C.cyan, delegate: C.pink, skill: C.gold, mcp: C.cyan, plan: C.gray,
 }
+/** Plain-language label per step kind, and the verb prefix `describeTool` put in front of the detail. */
+const LABEL: Record<string, string> = {
+  read: 'Reading', edit: 'Editing', bash: 'Running', search: 'Searching', web: 'Web', delegate: 'Delegating',
+  skill: 'Skill', mcp: 'MCP', plan: 'Planning', monitor: 'Watching', stop: 'Stopping',
+}
+const PREFIX = /^(read |edit |write |\$ |grep |glob |search |fetch |delegate → |skill |monitor |mcp |stop task )/
+/** A raw shell command as a short phrase a person can read at a glance. */
+const plainCmd = (c: string) =>
+  /\b(pytest|jest|vitest|npm (run )?test|cargo test|go test|dotnet test|tsc\b)/.test(c) ? 'run tests / type-check'
+  : /^(npm|pnpm|yarn|bun) (i|install|add)\b|^pip3? install\b/.test(c) ? 'install dependencies'
+  : /\b(build|compile|xcodebuild|gradle)\b/.test(c) ? 'build the project'
+  : /^git (\w+)/.test(c) ? 'git ' + /^git (\w+)/.exec(c)![1]
+  : /^(ls|cat|head|tail|sed|rg|grep|find)\b/.test(c) ? 'inspect files'
+  : /^sleep \d+/.test(c) ? 'wait'
+  : c
 const DOT: Record<string, [string, string]> = {
   stall: ['◌', C.gold], wait: ['◷', C.blue], done: ['●', C.dark], fail: ['✕', C.red], stop: ['■', C.orange],
 }
@@ -36,79 +51,78 @@ const mmss = (ms: number) => {
 }
 const textW = (segs: Seg[]) => segs.reduce((n, s) => n + vlen(s[0]), 0)
 
-export function drawFlow({ Box, Text }: Els, I: FlowInput) {
-  const { agents, states, now, tick } = I
-  const spin = SPIN[tick % SPIN.length]!
+/** Narrowest a subagent column may be before the rest are folded into "+n more". */
+const MIN_COL = 20
+const RECENT = 3
 
-  const row = (o: Owner) => {
+/** A step's detail cut down to a few words: a path becomes its file name, a shell command a plain phrase. */
+const brief = (st: Owner['steps'][number]) => {
+  const raw = st.tag === 'tool' ? st.text : st.text.replace(PREFIX, '')
+  if (st.tag === 'bash') return plainCmd(raw.replace(/^cd\s+\S+\s*(&&|;)\s*/, ''))
+  if (st.tag === 'read' || st.tag === 'edit') return raw.split('/').pop() ?? raw
+  return raw
+}
+
+/** One row of a column: coloured segments cut to the column's width. */
+const line = ({ Text }: Els, segs: Seg[]) => (
+  <Text mono wrap="truncate-end">
+    {segs.map(([t, c, s]) => <Text color={c} bold={s === 'b'} dimColor={s === 'd'} italic={s === 'i'}>{t}</Text>)}
+  </Text>
+)
+
+/**
+ * The live subagents side by side, one column each, split with a vertical line; a finished agent's column closes.
+ * A column is short on purpose: who, its model, context and cost, what it is doing now, and its last few steps.
+ */
+export function drawFlow(els: Els, I: FlowInput) {
+  const { Box, Text } = els
+  const { states, now, tick } = I
+  const spin = SPIN[tick % SPIN.length]!
+  const live = I.agents.filter(o => { const s = states.get(o.id) ?? 'run'; return s === 'run' || s === 'stall' || s === 'wait' })
+  if (live.length === 0) {
+    return { max: 0, el: <Box width={I.width} height={I.height}>{line(els, [['No subagents running', C.dark, 'i']])}</Box> }
+  }
+  const fit_n = Math.max(1, Math.floor((I.width + 1) / (MIN_COL + 1)))
+  const shown = live.slice(0, fit_n)
+  const more = live.length - shown.length
+  const cw = Math.floor((I.width - (shown.length - 1)) / shown.length)
+
+  const column = (o: Owner) => {
     const s = states.get(o.id) ?? 'run'
-    const live = s === 'run' || s === 'stall'
     const [ic, icol] = s === 'run' ? [spin, ACCENT] : DOT[s] ?? DOT.done!
     const pct = I.window > 0 ? o.ctx / I.window : 0
     const pcol = pct > 0.75 ? C.red : pct > 0.5 ? C.gold : C.green
-    const right: Seg[] = [
-      [prettyModel(o.model).padEnd(7), modelColor(o.model)],
-      [' ' + (o.type.replace('general-purpose', 'general') || 'agent').slice(0, 9).padEnd(9), C.gray],
-      [' ' + fmtTok(o.ctx).padStart(6), C.gray],
-      [(pct * 100).toFixed(0).padStart(4) + '%', pcol, 'b'],
-      [fmtCost(I.cost(o)).padStart(8), C.light, 'b'],
-      [' ' + mmss((live ? now : o.last) - (o.first || now)), C.dark],
+    const cur = o.steps.at(-1)
+    const rows = [
+      line(els, [[ic + ' ', icol], [fit(o.label, Math.max(4, cw - 2)), I.colorOf(o), 'b']]),
+      line(els, [
+        [prettyModel(o.model), modelColor(o.model)],
+        [' ' + (o.type.replace('general-purpose', 'general') || 'agent'), C.gray],
+        [' ' + (pct * 100).toFixed(0) + '%', pcol, 'b'],
+        [' ' + fmtCost(I.cost(o)), C.light],
+        [' ' + mmss(now - (o.first || now)), C.dark],
+      ]),
+      line(els, [[cur ? `${LABEL[cur.tag] ?? 'Working'}: ${brief(cur)}` : 'Starting…', C.light, 'b']]),
+      ...o.steps.slice(-1 - RECENT, -1).map(st => line(els, [
+        [st.err ? '✕ ' : '● ', st.err ? C.red : TAG[st.tag] ?? C.gray],
+        [brief(st), st.err ? C.red : C.gray],
+      ])),
     ]
-    const lw = Math.max(4, I.width - 2 - textW(right) - 1)
-    const segs: Seg[] = [[ic + ' ', icol], [fit(o.label, lw).padEnd(lw), I.colorOf(o), 'b'], [' '], ...right]
-    return (
-      <Text mono wrap="truncate-end">
-        {segs.map(([t, c, st]) => <Text color={c} bold={st === 'b'} dimColor={st === 'd'} italic={st === 'i'}>{t}</Text>)}
-      </Text>
-    )
+    return <Box flexDirection="column" width={cw} height={I.height} overflow="hidden">{rows}</Box>
   }
 
-  // Timeline line: `mm:ss ● Tag  text            +n -n | 1.2s`, times relative to the agent's start.
-  const stepLine = (o: Owner, st: Owner['steps'][number], live: boolean) => {
-    const running = st.end === 0 && live
-    const [ic, icol] = st.err ? ['✕', C.red] : running ? [spin, ACCENT] : ['●', TAG[st.tag] ?? C.gray]
-    const tag = (st.tag.charAt(0).toUpperCase() + st.tag.slice(1)).slice(0, 7).padEnd(7)
-    const right: Seg[] = st.plus || st.minus
-      ? [['+' + st.plus, C.green], [' -' + st.minus, C.red]]
-      : st.end ? [[(Math.max(0, st.end - st.ts) / 1000).toFixed(1) + 's', C.dark]] : []
-    const head: Seg[] = [['  ' + mmss(st.ts - (o.first || st.ts)) + ' ', C.dark], [ic + ' ', icol], [tag + ' ', TAG[st.tag] ?? C.gray, 'b']]
-    const tw = Math.max(4, I.width - textW(head) - textW(right) - 2)
-    const segs: Seg[] = [...head, [fit(st.text, tw).padEnd(tw), st.err ? C.red : C.light], [' '], ...right]
-    return (
-      <Text mono wrap="truncate-end">
-        {segs.map(([t, c, s]) => <Text color={c} bold={s === 'b'} dimColor={s === 'd'} italic={s === 'i'}>{t}</Text>)}
-      </Text>
-    )
-  }
-
-  // Each agent is a section: its header row, then the latest steps of its own workflow (and the report once finished).
-  const section = (o: Owner) => {
-    const s = states.get(o.id) ?? 'run'
-    const live = s === 'run' || s === 'stall'
-    const report = !live && o.report ? 1 : 0
-    return [
-      row(o),
-      ...o.steps.slice(-(STEPS - report)).map(st => stepLine(o, st, live)),
-      ...(report ? [
-        <Text mono wrap="truncate-end">
-          <Text color={C.dark}>{'  ' + mmss(o.last - (o.first || o.last)) + ' '}</Text>
-          <Text color={C.green}>{'✓ '}</Text>
-          <Text color={C.light}>{fit(o.report, Math.max(4, I.width - 11))}</Text>
-        </Text>,
-      ] : []),
-    ]
-  }
-
-  // A hairline separates one subagent session from the next; the column shows a window of `height` rows from `offset`.
-  const rule = <Text mono color={C.track}>{'─'.repeat(Math.max(1, I.width))}</Text>
-  const rows = agents.flatMap((o, i) => (i ? [rule, ...section(o)] : section(o)))
-  const max = Math.max(0, rows.length - I.height)
-  const off = Math.min(Math.max(0, I.offset), max)
+  const bar = (
+    <Box flexDirection="column" width={1} height={I.height}>
+      {Array.from({ length: I.height }, () => <Text mono color={C.track}>│</Text>)}
+    </Box>
+  )
+  const cols = shown.flatMap((o, i) => (i ? [bar, column(o)] : [column(o)]))
   return {
-    max,
+    max: 0,
     el: (
       <Box flexDirection="column" width={I.width} height={I.height} overflow="hidden">
-        {rows.slice(off, off + I.height)}
+        <Box flexDirection="row" width={I.width} height={more ? I.height - 1 : I.height}>{cols}</Box>
+        {more > 0 && line(els, [[`+${more} more running`, C.gray, 'i']])}
       </Box>
     ),
   }
