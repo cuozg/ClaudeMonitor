@@ -1,0 +1,266 @@
+// Claude Monitor: records the session from engine events into $.state and
+// draws it in a pane beside the chat on every surface (CLI, Desktop, VS Code).
+import { atom, read, update } from 'claude-code'
+import type { EngineInterface, Register } from 'claude-code'
+
+import type { CtxView, Mon, Owner, Task } from '../types'
+import { addTok, describeTool, firstLine, newOwner, price, summaryLine, taskNotes } from './lib'
+import { drawMonitor } from './view'
+
+const PANE = 'session-monitor'
+const TITLE = 'Monitor'
+// Asks for the widest dock the terminal allows (45% of its columns).
+const DOCK_COLUMNS = 400
+const MAX_LOG = 300
+const MAX_TS = 400
+
+const empty = (): Mon => ({ owners: { main: newOwner('main', 'main') }, order: ['main'], log: [], tasks: [], samples: [], working: false, closed: false })
+const data = atom({ plugin: 'session-monitor', key: 'data' } as const, empty(), { shape: 'mon-1' })
+const ctx = atom({ plugin: 'session-monitor', key: 'ctx' } as const, null, { shape: 'ctx-1' })
+
+let tick = 0
+
+const ownerOf = (m: Mon, id: string | undefined): Owner => {
+  const key = id ?? 'main'
+  let o = m.owners[key]
+  if (!o) {
+    o = newOwner(key, 'agent ' + key.slice(0, 6))
+    m.owners[key] = o
+    m.order.push(key)
+  }
+  return o
+}
+
+/** Applies `fn` to a copy of the recorded session and writes it back. */
+const edit = ($: EngineInterface, fn: (m: Mon) => void) =>
+  update($, data, prev => {
+    const m: Mon = JSON.parse(JSON.stringify(prev))
+    fn(m)
+    return m
+  })
+
+const push = <T,>(list: T[], item: T, cap: number) => {
+  list.push(item)
+  if (list.length > cap) list.splice(0, list.length - cap)
+}
+
+const logEvent = (m: Mon, ts: number, who: string, text: string, tag: string) => push(m.log, { ts, who, text, tag }, MAX_LOG)
+
+const seen = (o: Owner, ts: number) => {
+  if (!o.first) o.first = ts
+  o.last = Math.max(o.last, ts)
+}
+
+async function measureContext($: EngineInterface) {
+  const usage = await $.session.usage({ breakdown: 'summary' })
+  const b = usage.context.breakdown
+  const view: CtxView = {
+    window: b?.rawMaxTokens ?? usage.context.window,
+    tokens: usage.context.tokens ?? b?.totalTokens ?? 0,
+    rows: (b?.categories ?? []).map(c => ({ name: c.name, tokens: c.tokens, kind: c.kind })),
+    memory: (b?.memoryFiles ?? []).map(f => ({ name: f.path.split('/').pop() ?? f.path, type: f.type, tokens: f.tokens })),
+    mcpDeferred: (b?.mcpTools ?? []).filter(t => !t.isLoaded).length,
+  }
+  await update($, ctx, () => view)
+}
+
+async function openPane($: EngineInterface, columns = DOCK_COLUMNS) {
+  return $.ui.open({ id: PANE, title: TITLE, columns })
+}
+
+export const register: Register = on => {
+  on('session.start', async ($, e, next) => {
+    await $.command.register({ name: 'monitor', description: 'Open or close the session monitor pane', immediate: true })
+    $.clock.every(1000, () => {
+      tick++
+      $.ui.invalidate('ui.render')
+    })
+    const m = await read($, data)
+    if (!m.closed) void openPane($)
+    void measureContext($).catch(() => undefined)
+    return next(e)
+  })
+
+  on('session.end', async ($, e, next) => {
+    if (e.reason === 'clear') {
+      await update($, data, () => empty())
+      await update($, ctx, () => null)
+    }
+    return next(e)
+  })
+
+  on('command.run', { command: 'monitor' }, async ($, e) => {
+    const shown = (await $.ui.panes()).some(p => p.id === PANE)
+    if (shown) {
+      await $.ui.close({ id: PANE })
+      await edit($, m => void (m.closed = true))
+      return { text: 'Monitor closed.', isTextDisplayOnly: true }
+    }
+    await edit($, m => void (m.closed = false))
+    await openPane($, Math.ceil(e.presentation.columns * 0.45))
+    return { text: 'Monitor opened.', isTextDisplayOnly: true }
+  })
+
+  on('ui.close', async ($, e, next) => {
+    if (e.id === PANE && e.origin.kind === 'person') await edit($, m => void (m.closed = true))
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  on('prompt.submit', async ($, e, next) => {
+    const now = await $.clock.now()
+    const notes = taskNotes(e.text)
+    if (notes.length) {
+      await edit($, m => {
+        for (const n of notes) {
+          const t = m.tasks.find(x => x.id === n.id)
+          if (!t) continue
+          if (n.event) t.events++
+          if (n.summary || n.event) t.note = firstLine(n.event || n.summary)
+          const s = n.status.toLowerCase()
+          if (/completed|success/.test(s) || /stream ended/.test(n.summary)) t.state = 'done'
+          else if (/fail|error/.test(s)) t.state = 'fail'
+          else if (/kill|stop|cancel/.test(s)) t.state = 'stop'
+          if (t.state !== 'run' && !t.end) t.end = now
+        }
+      })
+    } else if (!e.isMeta && e.origin.kind !== 'peer' && !e.text.trimStart().startsWith('<')) {
+      await edit($, m => logEvent(m, now, 'you', '» ' + firstLine(e.text), 'prompt'))
+    }
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  on('turn.start', async ($, e, next) => {
+    if (e.agentId === undefined) await edit($, m => void (m.working = true))
+    return next(e)
+  })
+
+  on('turn.complete', async ($, e, next) => {
+    if (e.agentId === undefined) await edit($, m => void (m.working = false))
+    return next(e)
+  })
+
+  on('session.measure', async ($, e, next) => {
+    void measureContext($).catch(() => undefined)
+    return next(e)
+  })
+
+  on('agent.spawn', async ($, e, next) => {
+    const r = await next(e)
+    if (r.agentId) {
+      const id = r.agentId
+      const now = await $.clock.now()
+      await edit($, m => {
+        const o = ownerOf(m, id)
+        o.label = e.name || e.description || e.subagentType || o.label
+        o.type = e.subagentType
+        o.model = r.model || o.model
+        o.background = e.background
+        if (e.background) {
+          m.tasks.unshift({ id, kind: 'agent', desc: e.description || e.subagentType, owner: e.parentAgentId ?? 'main', start: now, end: 0, state: 'run', note: '', events: 0 })
+        }
+      })
+    }
+    return r
+  }).catch(($, e, next) => next(e))
+
+  on('classic.SubagentStop', async ($, e, next) => {
+    const report = summaryLine(e.last_assistant_message ?? '')
+    const now = await $.clock.now()
+    await edit($, m => {
+      const o = m.owners[e.agent_id]
+      if (o && report) o.report = report
+      const t = m.tasks.find(x => x.id === e.agent_id && x.state === 'run')
+      if (t) {
+        t.state = 'done'
+        t.end = now
+        t.note = report
+      }
+    })
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  on('turn.step', async function* ($, e, next) {
+    const r = yield* next(e)
+    if (r.usage) {
+      const u = r.usage
+      const now = await $.clock.now()
+      const p = price(u.model, u)
+      const say = summaryLine(r.answer)
+      await edit($, m => {
+        const o = ownerOf(m, e.agentId)
+        o.model = u.model || o.model
+        if (e.effort !== undefined) o.effort = String(e.effort)
+        o.tok = addTok(o.tok, p.tok)
+        o.usd = addTok(o.usd, p.usd)
+        o.nocache += p.nocache
+        o.ctx = p.tok.in + p.tok.cr + p.tok.cw
+        seen(o, now)
+        push(o.act, now, MAX_TS)
+        push(m.samples, [now, p.usd.in + p.usd.cw + p.usd.cr + p.usd.out], 2000)
+        if (say) {
+          o.say = o.action = say
+          o.sayTs = now
+          logEvent(m, now, o.label, say, 'say')
+        }
+      })
+    }
+    return r
+  })
+
+  on('tool.call', async ($, e, next) => {
+    const inp = e as unknown as Record<string, unknown>
+    const tool = String(e.tool)
+    const [desc, tag] = describeTool(tool, inp)
+    const id = e.tool_use_id
+    const agentId = e.agentId
+    const start = await $.clock.now()
+    await edit($, m => {
+      const o = ownerOf(m, agentId)
+      o.nTools++
+      o.action = desc
+      o.flights.push({ id, desc, ts: start })
+      seen(o, start)
+      push(o.act, start, MAX_TS)
+      logEvent(m, start, o.label, desc, tag)
+    })
+    const ran = await next(e)
+    const end = await $.clock.now()
+    const res = (ran.result ?? {}) as Record<string, unknown>
+    const bgId =
+      tool === 'Monitor' ? (res.taskId as string | undefined)
+      : tool === 'Bash' && inp.run_in_background ? (res.backgroundTaskId as string | undefined)
+      : undefined
+    await edit($, m => {
+      const o = ownerOf(m, agentId)
+      o.flights = o.flights.filter(f => f.id !== id)
+      seen(o, end)
+      if (ran.isError || ran.deny) {
+        push(o.errs, end, MAX_TS)
+        logEvent(m, end, o.label, '✗ ' + firstLine(ran.deny ?? ran.text ?? 'error'), 'fail')
+      }
+      if (bgId) {
+        const t: Task = {
+          id: bgId, kind: tool === 'Monitor' ? 'monitor' : 'shell', desc: firstLine(inp.description ?? inp.command ?? desc),
+          owner: agentId ?? 'main', start, end: 0, state: 'run', note: firstLine(inp.command ?? ''), events: 0,
+        }
+        m.tasks.unshift(t)
+      }
+    })
+    return ran
+  }).catch(($, e, next) => next(e))
+
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const els = $.ui.resolve(e)
+    const [m, cx, usage, agents, now, cwd, sid] = await Promise.all([
+      read($, data),
+      read($, ctx),
+      $.session.usage(),
+      $.agent.list(),
+      $.clock.now(),
+      $.session.cwd(),
+      $.session.id(),
+    ])
+    const home = (await $.env.get('HOME')) ?? ''
+    return drawMonitor(els, { m, cx, usage, agents, now, cwd, home, sid, tick, width: e.props.bodyColumns })
+  })
+}

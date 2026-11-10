@@ -2,7 +2,7 @@ const vscode = require('vscode');
 const os = require('os');
 const path = require('path');
 
-const RUN = path.join(os.homedir(), '.claude', 'monitor', 'monitor-run.sh');
+const RUN = path.join(os.homedir(), '.claude', 'monitor', '_v1', 'monitor-run.sh');
 // Same rules as ~/.claude/monitor/claude-monitor.zsh: only interactive sessions get a monitor.
 const SKIP_SUB = new Set(['agents', 'attach', 'auth', 'auto-mode', 'doctor', 'gateway', 'import', 'install', 'logs', 'mcp',
   'plugin', 'plugins', 'purge', 'respawn', 'rm', 'setup-token', 'stop', 'kill', 'ultrareview', 'update', 'upgrade']);

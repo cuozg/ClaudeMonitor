@@ -1,0 +1,16 @@
+{
+  "name": "session-monitor",
+  "owner": {
+    "name": "cuongnp"
+  },
+  "metadata": {
+    "description": "Live session monitor mod for Claude Code"
+  },
+  "plugins": [
+    {
+      "name": "session-monitor",
+      "source": "./",
+      "description": "Live cost, context and agent-team dashboard in a pane beside the chat (CLI, Desktop, VS Code)"
+    }
+  ]
+}

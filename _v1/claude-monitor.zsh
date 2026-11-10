@@ -15,7 +15,7 @@ _claude_monitor_wanted() {
 claude() {
   local bin=${commands[claude]}
   if [[ -z $TMUX && $TERM_PROGRAM != vscode && -n $bin ]] && (( $+commands[tmux] )) && _claude_monitor_wanted "$@"; then
-    local s="claude-$$-$RANDOM" d=$HOME/.claude/monitor
+    local s="claude-$$-$RANDOM" d=$HOME/.claude/monitor/_v1
     local t=(tmux -L claude -f $d/tmux.conf)
     $t new-session -d -s $s -c "$PWD" -x $COLUMNS -y $LINES \
       "${(q)bin} ${(j: :)${(q)@}}; tmux -L claude kill-session -t $s" || { command claude "$@"; return }
