@@ -159,7 +159,7 @@ test('the band above the prompt shows figures and toggles the pane', async ($, o
   }
 })
 
-test('each running subagent gets its own column; those that do not fit fold into "+n more"', async ($, on) => {
+test('each subagent gets one flow row in a single column', async ($, on) => {
   engine(on)
   await $.session.start({ cwd: '/Users/me/shop', surface: 'terminal', isInteractive: true })
   const spawn = (i: number) =>
@@ -167,8 +167,7 @@ test('each running subagent gets its own column; those that do not fit fold into
   for (let i = 1; i <= 12; i++) {
     await spawn(i)
     const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 200 } })
-    for (let j = 1; j <= Math.min(i, 4); j++) expect(await ui.find({ type: 'Text', text: new RegExp('^\\S task ' + j + '$') })).toBeDefined()
-    expect(!!(await ui.find({ type: 'Text', text: /\+\d+ more running/ }))).toBe(i > 4)
+    for (let j = 1; j <= i; j++) expect(await ui.find({ type: 'Text', text: new RegExp('task ' + j + '\\b') })).toBeDefined()
     await ui.unmount()
   }
 })
@@ -185,7 +184,7 @@ test('each subagent section lists the steps of its own workflow', async ($, on) 
   await ui.unmount()
 })
 
-test('a vertical line separates two subagent columns, and the band toggles the agents half of the pane', async ($, on) => {
+test('a hairline separates two subagent sessions, and the band toggles the agents half of the pane', async ($, on) => {
   engine(on, { panes: false })
   let open = false
   on('ui.open', () => ((open = true), { value: { isPlaced: true } }))
@@ -196,7 +195,7 @@ test('a vertical line separates two subagent columns, and the band toggles the a
     await $.agent.spawn({ tool_use_id: 'tu' + i, prompt: 'p', description: 'job ' + i, subagentType: 'Explore', provider: { plugin: 'engine' }, parentModel: 'claude-opus-5-5', background: false, fork: false } as never)
   }
   let ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 80 } })
-  expect(await ui.find({ type: 'Text', text: /^│$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^─+$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^shop$/ })).toBeDefined()
   await ui.unmount()
   const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
@@ -204,7 +203,7 @@ test('a vertical line separates two subagent columns, and the band toggles the a
   await band.press({ key: 'agents' })
   expect(open).toBe(true)
   ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 80 } })
-  expect(await ui.find({ type: 'Text', text: /^\S job 1$/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /job 1/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /^shop$/ })).toBeDefined()
   await ui.unmount()
   await band.unmount()
@@ -230,20 +229,29 @@ test('the monitor and the subagents share the pane in equal halves', async ($, o
   expect(narrow).toContain('─'.repeat(80))
 })
 
-test('a subagent column closes when the agent finishes', async ($, on) => {
-  let status = 'running'
-  engine(on, { agents: () => [{ id: 'ag1', description: 'task 1', type: 'Explore', status }] })
+test('the wheel over the subagents scrolls them alone; over the monitor it moves nothing', async ($, on) => {
+  engine(on)
   await $.session.start({ cwd: '/Users/me/shop', surface: 'terminal', isInteractive: true })
-  await $.agent.spawn({ tool_use_id: 'tu1', prompt: 'p', description: 'task 1', subagentType: 'Explore', provider: { plugin: 'engine' }, parentModel: 'claude-opus-5-5', background: false, fork: false } as never)
-  const shown = async () => {
-    const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 120 } })
-    const t = !!(await ui.find({ type: 'Text', text: /^\S task 1$/ }))
-    await ui.unmount()
-    return t
+  for (let i = 1; i <= 30; i++) {
+    await $.agent.spawn({ tool_use_id: 'tu' + i, prompt: 'p', description: 'task ' + i, subagentType: 'Explore', provider: { plugin: 'engine' }, parentModel: 'claude-opus-5-5', background: false, fork: false } as never)
   }
-  expect(await shown()).toBe(true)
-  status = 'completed'
-  expect(await shown()).toBe(false)
+  const props = { ...PANE.props, bodyColumns: 120, scroll: { offset: 0, bodyRows: 20 } }
+  const draw = async () => {
+    const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props })
+    const top = !!(await ui.find({ type: 'Text', text: /task 1\b/ }))
+    const shop = !!(await ui.find({ type: 'Text', text: /^shop$/ }))
+    await ui.unmount()
+    return { top, shop }
+  }
+  expect(await draw()).toEqual({ top: true, shop: true })
+  const wheel = (column: number, by: number) =>
+    $.ui.scroll({ component: 'Pane', requestId: 'session-monitor', offset: 0, by, bodyRows: 20, contentRows: 20, origin: { kind: 'person' }, pointer: { column, row: 3 } } as never)
+  await wheel(90, 5)
+  expect(await draw()).toEqual({ top: true, shop: true })
+  await wheel(10, 5)
+  expect(await draw()).toEqual({ top: false, shop: true })
+  await wheel(10, -5)
+  expect(await draw()).toEqual({ top: true, shop: true })
 })
 
 test('a background agent task ends when the engine lists its agent as ended, without a SubagentStop', async ($, on) => {
