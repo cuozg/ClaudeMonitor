@@ -38,7 +38,8 @@ function engine(on: On, { usage = USAGE as object, agents = true, panes = true }
   on('env.get', () => ({ value: '/Users/me' }))
   on('agent.list', () => ({ value: agents ? [{ id: 'ag1', description: 'review code', type: 'Explore', status: 'running' as const }] : [] }))
   on('tool.call', () => ({ result: {} }))
-  on('agent.spawn', () => ({ model: 'claude-haiku-5-5', agentId: 'ag1' }))
+  let spawned = 0
+  on('agent.spawn', () => ({ model: 'claude-haiku-5-5', agentId: 'ag' + ++spawned }))
   on('turn.step', async function* (_, e) {
     return {
       turnId: e.turnId, index: e.index, answer: 'Looking at the cart code now', toolUses: [], stopReason: 'end_turn' as const,
@@ -156,6 +157,23 @@ test('the band above the prompt shows figures and toggles the pane', async ($, o
     expect(open).toBe(false)
     await ui.press({ key: 'toggle' })
     expect(open).toBe(true)
+    await ui.unmount()
+  }
+})
+
+test('each subagent gets a flow card, laid out 1x1, 1x2, 2x2, 3x2 and 3x3', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: '/Users/me/shop', surface: 'terminal', isInteractive: true })
+  const spawn = (i: number) =>
+    $.agent.spawn({ tool_use_id: 'tu' + i, prompt: 'p', description: 'task ' + i, subagentType: 'Explore', provider: { plugin: 'engine' }, parentModel: 'claude-opus-5-5', background: false, fork: false } as never)
+  for (let i = 1; i <= 10; i++) {
+    await spawn(i)
+    await $.tool.call({ tool: 'Edit', file_path: `/Users/me/shop/f${i}.ts`, old_string: 'a', new_string: 'a\nb\nc', agentId: 'ag' + i } as never)
+    const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 200 } })
+    const shown = Math.min(i, 9)
+    for (let j = i - shown + 1; j <= i; j++) expect(await ui.find({ type: 'Text', text: new RegExp('^\\d\\d:\\d\\d . edit f' + j + '\\.ts') })).toBeDefined()
+    if (i === 1) expect(await ui.find({ type: 'Text', text: /\+3/ })).toBeDefined()
+    if (i === 10) expect(await ui.find({ type: 'Text', text: /^\d\d:\d\d . edit f1\.ts/ })).toBeUndefined()
     await ui.unmount()
   }
 })

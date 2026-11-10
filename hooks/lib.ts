@@ -69,7 +69,7 @@ export const hitRate = (t: Tok) => {
 export function newOwner(id: string, label: string): Owner {
   return {
     id, label, type: '', model: '', effort: '', background: false, tok: zero(), usd: zero(), nocache: 0, ctx: 0,
-    nTools: 0, first: 0, last: 0, act: [], errs: [], flights: [], action: '', say: '', sayTs: 0, report: '',
+    nTools: 0, first: 0, last: 0, act: [], errs: [], flights: [], steps: [], action: '', say: '', sayTs: 0, report: '',
   }
 }
 
@@ -187,6 +187,17 @@ export function describeTool(name: string, inp: Record<string, unknown>): [strin
   }
   if (name.startsWith('mcp__')) return ['mcp ' + name.split('__').slice(1, 3).join('·'), 'mcp']
   return [name, 'tool']
+}
+
+/** Lines added and removed by an edit-like tool call. */
+export function lineDelta(name: string, inp: Record<string, unknown>): [number, number] {
+  const n = (v: unknown) => (typeof v === 'string' && v ? v.split('\n').length : 0)
+  if (name === 'Edit') return [n(inp.new_string), n(inp.old_string)]
+  if (name === 'Write') return [n(inp.content), 0]
+  if (name === 'MultiEdit' && Array.isArray(inp.edits)) {
+    return (inp.edits as Record<string, unknown>[]).reduce<[number, number]>((a, e) => [a[0] + n(e.new_string), a[1] + n(e.old_string)], [0, 0])
+  }
+  return [0, 0]
 }
 
 /** Each `<task-notification>` block of a delivered message. */

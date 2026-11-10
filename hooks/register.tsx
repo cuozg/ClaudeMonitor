@@ -4,8 +4,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { CtxView, Mon, Owner, Task } from '../types'
-import { addTok, describeTool, firstLine, newOwner, price, summaryLine, taskNotes } from './lib'
-import { drawBand, drawMonitor } from './view'
+import { addTok, describeTool, firstLine, lineDelta, newOwner, price, summaryLine, taskNotes } from './lib'
+import { drawBand, drawPane } from './view'
 
 const PANE = 'session-monitor'
 const TITLE = 'Monitor'
@@ -13,9 +13,10 @@ const TITLE = 'Monitor'
 const DOCK_COLUMNS = 400
 const MAX_LOG = 300
 const MAX_TS = 400
+const MAX_STEPS = 40
 
 const empty = (): Mon => ({ owners: { main: newOwner('main', 'main') }, order: ['main'], log: [], tasks: [], samples: [], working: false, closed: false })
-const data = atom({ plugin: 'session-monitor', key: 'data' } as const, empty(), { shape: 'mon-1' })
+const data = atom({ plugin: 'session-monitor', key: 'data' } as const, empty(), { shape: 'mon-2' })
 const ctx = atom({ plugin: 'session-monitor', key: 'ctx' } as const, null, { shape: 'ctx-1' })
 
 let tick = 0
@@ -164,6 +165,7 @@ export const register: Register = on => {
         o.type = e.subagentType
         o.model = r.model || o.model
         o.background = e.background
+        seen(o, now)
         if (e.background) {
           m.tasks.unshift({ id, kind: 'agent', desc: e.description || e.subagentType, owner: e.parentAgentId ?? 'main', start: now, end: 0, state: 'run', note: '', events: 0 })
         }
@@ -228,6 +230,10 @@ export const register: Register = on => {
       o.nTools++
       o.action = desc
       o.flights.push({ id, desc, ts: start })
+      if (agentId) {
+        const [plus, minus] = lineDelta(tool, inp)
+        push(o.steps, { id, ts: start, end: 0, tag, text: desc, err: false, plus, minus }, MAX_STEPS)
+      }
       seen(o, start)
       push(o.act, start, MAX_TS)
       logEvent(m, start, o.label, desc, tag)
@@ -242,6 +248,11 @@ export const register: Register = on => {
     await edit($, m => {
       const o = ownerOf(m, agentId)
       o.flights = o.flights.filter(f => f.id !== id)
+      const step = o.steps.find(x => x.id === id)
+      if (step) {
+        step.end = end
+        step.err = !!(ran.isError || ran.deny)
+      }
       seen(o, end)
       if (ran.isError || ran.deny) {
         push(o.errs, end, MAX_TS)
@@ -270,7 +281,7 @@ export const register: Register = on => {
       $.session.id(),
     ])
     const home = (await $.env.get('HOME')) ?? ''
-    return drawMonitor(els, { m, cx, usage, agents, now, cwd, home, sid, tick, width: e.props.bodyColumns })
+    return drawPane(els, { m, cx, usage, agents, now, cwd, home, sid, tick, width: e.props.bodyColumns, rows: e.props.scroll.bodyRows })
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {

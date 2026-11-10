@@ -2,6 +2,7 @@
 import type { AgentInfo, Elements, RenderChildren, SessionUsage } from 'claude-code'
 
 import type { CtxView, Mon, Owner, Task } from '../types'
+import { drawFlow, pickAgents } from './flow'
 import {
   C, LANE, SPIN, STALL_MS, bar, fit, fmtCost, fmtDur, fmtTok, hhmmss, hitRate, modelColor,
   prettyModel, sumTok, vlen, zero, addTok,
@@ -30,7 +31,7 @@ const ERR_WINDOW = 300_000
 const LIMIT_LABEL = (kind: string) => (kind === 'five_hour' ? '5h limit' : kind === 'seven_day' ? '7d limit' : kind.replace(/_/g, ' '))
 
 /** Each subagent's state, from the engine's agent list and what the monitor recorded. */
-function classify(m: Mon, agents: AgentInfo[], now: number): Map<string, AgentState> {
+export function classify(m: Mon, agents: AgentInfo[], now: number): Map<string, AgentState> {
   const info = new Map(agents.map(a => [a.id, a.status]))
   const out = new Map<string, AgentState>()
   for (const id of m.order.slice(1)) {
@@ -424,6 +425,38 @@ export function drawBand({ Box, Text, Button }: BandEls, B: BandInput) {
         {seg(String(tasks), tasks ? C.cyan : C.gray)}
       </Text>
       <Button key="toggle" label={B.shown ? 'Hide monitor' : 'Show monitor'} onPress={B.onToggle} />
+    </Box>
+  )
+}
+
+/** The pane: with subagents, their agent-flow grid sits left of the monitor sections (stacked above them when narrow). */
+export function drawPane(els: Els, I: Input & { rows: number }) {
+  const { m } = I
+  const subs = m.order.slice(1).map(id => m.owners[id]!).filter(Boolean)
+  if (subs.length === 0) return drawMonitor(els, I)
+  const { Box } = els
+  const states = classify(m, I.agents, I.now)
+  const { k } = billOf(m, I.usage)
+  const flowOf = (width: number, height: number) =>
+    drawFlow(els, {
+      agents: pickAgents(subs, states), states, now: I.now, tick: I.tick, width, height,
+      colorOf: o => LANE[(subs.indexOf(o) + 1) % LANE.length]!, cost: o => sumTok(o.usd) * k,
+      window: I.cx?.window ?? I.usage.context.window,
+    })
+  const rows = Math.max(12, I.rows)
+  if (I.width >= 110) {
+    const monW = Math.max(56, Math.floor(I.width * 0.42))
+    return (
+      <Box flexDirection="row" columnGap={1} width={I.width}>
+        {flowOf(I.width - monW - 1, rows)}
+        {drawMonitor(els, { ...I, width: monW })}
+      </Box>
+    )
+  }
+  return (
+    <Box flexDirection="column" width={I.width}>
+      {flowOf(I.width, Math.max(10, Math.floor(rows / 2)))}
+      {drawMonitor(els, I)}
     </Box>
   )
 }

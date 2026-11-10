@@ -4,6 +4,9 @@ export type Tok = { in: number; cw: number; cr: number; out: number }
 /** A tool call in flight. */
 export type Flight = { id: string; desc: string; ts: number }
 
+/** One tool call of an agent: what it did, when, and the lines it changed. */
+export type Step = { id: string; ts: number; end: number; tag: string; text: string; err: boolean; plus: number; minus: number }
+
 /** The main loop or one subagent: what it spent and what it is doing. */
 export type Owner = {
   id: string
@@ -22,6 +25,7 @@ export type Owner = {
   act: number[]
   errs: number[]
   flights: Flight[]
+  steps: Step[]
   action: string
   say: string
   sayTs: number
