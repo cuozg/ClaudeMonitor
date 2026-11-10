@@ -2,7 +2,7 @@
 import type { AgentInfo, Elements, RenderChildren, SessionUsage } from 'claude-code'
 
 import type { CtxView, Mon, Owner, Task } from '../types'
-import { drawFlow, pickAgents } from './flow'
+import { drawFlow } from './flow'
 import {
   C, LANE, SPIN, STALL_MS, bar, fit, fmtCost, fmtDur, fmtTok, hhmmss, hitRate, modelColor,
   prettyModel, sumTok, vlen, zero, addTok,
@@ -375,18 +375,44 @@ export function drawBand({ Box, Text, Button }: BandEls, B: BandInput) {
   )
 }
 
-/** The subagents pane: one section per subagent, each with its own step timeline. */
-export function drawAgents(els: Els, I: Input & { rows: number }) {
+/** Where the subagents column sits in the pane body: its first column and row, and its size. */
+export type AgentsBox = { column: number; row: number; width: number; height: number }
+
+/** Wide enough for the monitor and the subagents side by side (else the monitor sits on top). */
+const SPLIT_COLUMNS = 100
+
+/**
+ * The monitor pane: the monitor alone, or the monitor and the subagents in two equal halves: subagents left
+ * and monitor right when wide, monitor on top when narrow. The monitor fits its half; the subagents scroll from `offset`.
+ */
+export function drawPane(els: Els, I: Input & { rows: number; offset: number; showAgents: boolean }): { el: RenderChildren; agents?: AgentsBox; max: number } {
   const { m } = I
   const subs = m.order.slice(1).map(id => m.owners[id]!).filter(Boolean)
-  const { Box, Text } = els
-  if (subs.length === 0) return <Box paddingX={1}><Text color={C.dark}>no subagents spawned yet</Text></Box>
+  if (!I.showAgents || subs.length === 0) return { el: drawMonitor(els, I), max: 0 }
+  const { Box } = els
+  const W = Math.max(30, I.width)
+  const wide = W >= SPLIT_COLUMNS
+  const half = wide ? Math.floor(W / 2) : Math.floor(I.rows / 2)
+  const box: AgentsBox = wide
+    ? { column: 0, row: 0, width: half, height: I.rows }
+    : { column: 0, row: half, width: W, height: Math.max(1, I.rows - half) }
+  const monW = wide ? W - half : W
+  const monRows = wide ? I.rows : half
   const states = classify(m, I.agents, I.now)
   const { k } = billOf(m, I.usage)
-  const height = Math.max(10, I.rows)
-  return drawFlow(els, {
-    agents: pickAgents(subs, states, height), states, now: I.now, tick: I.tick, width: I.width, height,
+  const flow = drawFlow(els, {
+    agents: subs, states, now: I.now, tick: I.tick, width: box.width - 2, height: box.height, offset: I.offset,
     colorOf: o => LANE[(subs.indexOf(o) + 1) % LANE.length]!, cost: o => sumTok(o.usd) * k,
     window: I.cx?.window ?? I.usage.context.window,
   })
+  return {
+    agents: box,
+    max: flow.max,
+    el: (
+      <Box flexDirection={wide ? 'row-reverse' : 'column'} width={W}>
+        <Box width={monW} height={monRows} overflow="hidden">{drawMonitor(els, { ...I, width: monW, rows: monRows })}</Box>
+        <Box width={box.width} height={box.height} paddingX={1}>{flow.el}</Box>
+      </Box>
+    ),
+  }
 }

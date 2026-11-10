@@ -15,8 +15,6 @@ const PANE = {
   },
 } as const
 
-const AGENTS = { ...PANE, requestId: 'session-monitor-agents' } as const
-
 const USAGE = {
   startedAt: 1_700_000_000_000,
   context: { tokens: 52_000, window: 1_000_000, percent: 5 },
@@ -168,7 +166,7 @@ test('each subagent gets one flow row in a single column', async ($, on) => {
     $.agent.spawn({ tool_use_id: 'tu' + i, prompt: 'p', description: 'task ' + i, subagentType: 'Explore', provider: { plugin: 'engine' }, parentModel: 'claude-opus-5-5', background: false, fork: false } as never)
   for (let i = 1; i <= 12; i++) {
     await spawn(i)
-    const ui = await $.ui.mount({ ...AGENTS, surface: 'desktop', props: { ...PANE.props, bodyColumns: 200 } })
+    const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 200 } })
     for (let j = 1; j <= i; j++) expect(await ui.find({ type: 'Text', text: new RegExp('task ' + j + '\\b') })).toBeDefined()
     await ui.unmount()
   }
@@ -180,28 +178,75 @@ test('each subagent section lists the steps of its own workflow', async ($, on) 
   await $.agent.spawn({ tool_use_id: 'tu1', prompt: 'p', description: 'worker', subagentType: 'Explore', provider: { plugin: 'engine' }, parentModel: 'claude-opus-5-5', background: false, fork: false } as never)
   await $.tool.call({ tool: 'Read', file_path: '/Users/me/shop/cart.ts', agentId: 'ag1' } as never)
   await $.tool.call({ tool: 'Edit', file_path: '/Users/me/shop/pay.ts', old_string: 'a', new_string: 'b\nc', agentId: 'ag1' } as never)
-  const ui = await $.ui.mount({ ...AGENTS, surface: 'desktop', props: { ...PANE.props, bodyColumns: 200 } })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 200 } })
   expect(await ui.find({ type: 'Text', text: /cart\.ts/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /pay\.ts/ })).toBeDefined()
   await ui.unmount()
 })
 
-test('a hairline separates two subagent sessions, and the band toggles the agents pane', async ($, on) => {
+test('a hairline separates two subagent sessions, and the band toggles the agents half of the pane', async ($, on) => {
   engine(on, { panes: false })
   let open = false
   on('ui.open', () => ((open = true), { value: { isPlaced: true } }))
   on('ui.close', () => ((open = false), { value: undefined }))
-  on('ui.panes', () => ({ value: open ? [{ id: 'session-monitor-agents', title: 'Subagents', isShown: true, isFocused: false, isPlaced: true }] : [] }))
+  on('ui.panes', () => ({ value: open ? [{ id: 'session-monitor', title: 'Monitor', isShown: true, isFocused: false, isPlaced: true }] : [] }))
   await $.session.start({ cwd: '/Users/me/shop', surface: 'terminal', isInteractive: true })
   for (const i of [1, 2]) {
     await $.agent.spawn({ tool_use_id: 'tu' + i, prompt: 'p', description: 'job ' + i, subagentType: 'Explore', provider: { plugin: 'engine' }, parentModel: 'claude-opus-5-5', background: false, fork: false } as never)
   }
-  const ui = await $.ui.mount({ ...AGENTS, surface: 'desktop', props: { ...AGENTS.props, bodyColumns: 80 } })
+  let ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 80 } })
   expect(await ui.find({ type: 'Text', text: /^─+$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^shop$/ })).toBeDefined()
   await ui.unmount()
   const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
   expect((await band.find({ key: 'agents' }))?.text).toMatch(/Hide agents/)
   await band.press({ key: 'agents' })
-  expect(open).toBe(false)
+  expect(open).toBe(true)
+  ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 80 } })
+  expect(await ui.find({ type: 'Text', text: /job 1/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /^shop$/ })).toBeDefined()
+  await ui.unmount()
   await band.unmount()
+})
+
+test('the monitor and the subagents share the pane in equal halves', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: '/Users/me/shop', surface: 'terminal', isInteractive: true })
+  await $.agent.spawn({ tool_use_id: 'tu1', prompt: 'p', description: 'worker', subagentType: 'Explore', provider: { plugin: 'engine' }, parentModel: 'claude-opus-5-5', background: false, fork: false } as never)
+  const widths = async (bodyColumns: number) => {
+    const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns } })
+    const tree = JSON.stringify(await ui.drawn())
+    await ui.unmount()
+    return tree
+  }
+  const wide = await widths(120)
+  expect(wide).toContain('"flexDirection":"row-reverse"')
+  expect(wide).toContain('"width":60,"height":60')
+  const narrow = await widths(80)
+  expect(narrow).toContain('"width":80,"height":30')
+})
+
+test('the wheel over the subagents scrolls them alone; over the monitor it moves nothing', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: '/Users/me/shop', surface: 'terminal', isInteractive: true })
+  for (let i = 1; i <= 30; i++) {
+    await $.agent.spawn({ tool_use_id: 'tu' + i, prompt: 'p', description: 'task ' + i, subagentType: 'Explore', provider: { plugin: 'engine' }, parentModel: 'claude-opus-5-5', background: false, fork: false } as never)
+  }
+  const props = { ...PANE.props, bodyColumns: 120, scroll: { offset: 0, bodyRows: 20 } }
+  const draw = async () => {
+    const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props })
+    const top = !!(await ui.find({ type: 'Text', text: /task 1\b/ }))
+    const shop = !!(await ui.find({ type: 'Text', text: /^shop$/ }))
+    await ui.unmount()
+    return { top, shop }
+  }
+  expect(await draw()).toEqual({ top: true, shop: true })
+  const wheel = (column: number, by: number) =>
+    $.ui.scroll({ component: 'Pane', requestId: 'session-monitor', offset: 0, by, bodyRows: 20, contentRows: 20, origin: { kind: 'person' }, pointer: { column, row: 3 } } as never)
+  await wheel(90, 5)
+  expect(await draw()).toEqual({ top: true, shop: true })
+  await wheel(10, 5)
+  expect(await draw()).toEqual({ top: false, shop: true })
+  await wheel(10, -5)
+  expect(await draw()).toEqual({ top: true, shop: true })
 })

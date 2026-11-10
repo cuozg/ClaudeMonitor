@@ -16,25 +16,18 @@ export type FlowInput = {
   tick: number
   width: number
   height: number
+  /** The first row shown: the column scrolls on its own, clamped to its rows. */
+  offset: number
 }
 
 const ACCENT = '#d97757'
 const MAX_CELLS = 9
+const STEPS = 8
 const TAG: Record<string, string> = {
   read: C.blue, edit: C.orange, bash: C.green, search: C.purple, web: C.cyan, delegate: C.pink, skill: C.gold, mcp: C.cyan, plan: C.gray,
 }
 const DOT: Record<string, [string, string]> = {
   stall: ['◌', C.gold], wait: ['◷', C.blue], done: ['●', C.dark], fail: ['✕', C.red], stop: ['■', C.orange],
-}
-
-/** At most `max` agents, in spawn order; past that the oldest finished ones leave first. */
-export function pickAgents(subs: Owner[], states: Map<string, string>, max: number): Owner[] {
-  const list = [...subs]
-  while (list.length > Math.max(1, max)) {
-    const i = list.findIndex(o => ['done', 'fail', 'stop'].includes(states.get(o.id) ?? ''))
-    list.splice(i < 0 ? 0 : i, 1)
-  }
-  return list
 }
 
 const mmss = (ms: number) => {
@@ -89,33 +82,34 @@ export function drawFlow({ Box, Text }: Els, I: FlowInput) {
   }
 
   // Each agent is a section: its header row, then the latest steps of its own workflow (and the report once finished).
-  const per = Math.floor((I.height - (agents.length - 1)) / Math.max(1, agents.length))
-  const nSteps = per >= 2 ? Math.min(per - 1, 8) : 0
   const section = (o: Owner) => {
     const s = states.get(o.id) ?? 'run'
     const live = s === 'run' || s === 'stall'
     const report = !live && o.report ? 1 : 0
-    const steps = nSteps - report > 0 ? o.steps.slice(-(nSteps - report)) : []
-    return (
-      <Box flexDirection="column">
-        {row(o)}
-        {steps.map(st => stepLine(o, st, live))}
-        {report && nSteps > 0 ? (
-          <Text mono wrap="truncate-end">
-            <Text color={C.dark}>{'  ' + mmss(o.last - (o.first || o.last)) + ' '}</Text>
-            <Text color={C.green}>{'✓ '}</Text>
-            <Text color={C.light}>{fit(o.report, Math.max(4, I.width - 11))}</Text>
-          </Text>
-        ) : null}
-      </Box>
-    )
+    return [
+      row(o),
+      ...o.steps.slice(-(STEPS - report)).map(st => stepLine(o, st, live)),
+      ...(report ? [
+        <Text mono wrap="truncate-end">
+          <Text color={C.dark}>{'  ' + mmss(o.last - (o.first || o.last)) + ' '}</Text>
+          <Text color={C.green}>{'✓ '}</Text>
+          <Text color={C.light}>{fit(o.report, Math.max(4, I.width - 11))}</Text>
+        </Text>,
+      ] : []),
+    ]
   }
 
-  // A hairline separates one subagent session from the next.
+  // A hairline separates one subagent session from the next; the column shows a window of `height` rows from `offset`.
   const rule = <Text mono color={C.track}>{'─'.repeat(Math.max(1, I.width))}</Text>
-  return (
-    <Box flexDirection="column" width={I.width} height={I.height} overflow="hidden">
-      {agents.flatMap((o, i) => (i ? [rule, section(o)] : [section(o)]))}
-    </Box>
-  )
+  const rows = agents.flatMap((o, i) => (i ? [rule, ...section(o)] : section(o)))
+  const max = Math.max(0, rows.length - I.height)
+  const off = Math.min(Math.max(0, I.offset), max)
+  return {
+    max,
+    el: (
+      <Box flexDirection="column" width={I.width} height={I.height} overflow="hidden">
+        {rows.slice(off, off + I.height)}
+      </Box>
+    ),
+  }
 }

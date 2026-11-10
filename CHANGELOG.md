@@ -4,8 +4,8 @@
 
 ### Added
 
-- **Agent flow**: subagents live in their own **Subagents** pane, apart from the monitor pane. Each subagent is its own section: a header row (state, label, model, type, context size and %, cost, elapsed time) and the timeline of its latest steps (time, tool, target, lines changed or duration, errors), plus its report once finished. A hairline separates one subagent from the next. With little height the sections shrink to the header row. When rows run out, the oldest finished agents leave first. The pane opens with the first subagent.
-- A **Hide agents / Show agents** button in the band above the prompt toggles the Subagents pane.
+- **Agent flow**: subagents share the monitor pane in two equal halves: subagents on the left and the monitor on the right when the pane is 100+ columns wide, else the monitor on top and the subagents below. The halves scroll apart: the wheel over the subagents (or the scroll keys) scrolls them, while the monitor fits its half. Each subagent is its own section: a header row (state, label, model, type, context size and %, cost, elapsed time) and the timeline of its latest 8 steps (time, tool, target, lines changed or duration, errors), plus its report once finished. A hairline separates one subagent from the next. The half shows with the first subagent.
+- A **Hide agents / Show agents** button in the band above the prompt toggles the subagents half (and opens the pane when it is closed).
 
 ### Changed
 
