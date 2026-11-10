@@ -276,8 +276,8 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     const els = $.ui.resolve(e)
-    const [m, usage, agents, shown] = await Promise.all([read($, data), $.session.usage(), $.agent.list(), isShown($)])
+    const [m, cx, usage, agents, now, shown] = await Promise.all([read($, data), read($, ctx), $.session.usage(), $.agent.list(), $.clock.now(), isShown($)])
     const columns = e.viewport?.columns
-    return drawBand(els, { m, usage, agents, shown, tick, width: e.props.bodyColumns, onToggle: () => void toggle($, columns) })
+    return drawBand(els, { m, cx, usage, agents, now, shown, tick, width: e.props.bodyColumns, onToggle: () => void toggle($, columns) })
   })
 }

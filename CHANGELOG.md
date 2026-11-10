@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.2.0 (2026-11-10)
+
+### Added
+
+- A **Needs attention** box at the top of the pane, shown only when something needs a look: failed or stalled agents, failed tasks, a nearly full context, a rate limit at 80%+, a burn rate above $20/h, repeated tool errors, or a long-running main tool call.
+- The band above the prompt shows the alert (or the alert count) in red or gold.
+
+### Changed
+
+- The pane is compact and every figure shows once: the cost total, cache hit rate, model and rates, context size and agent counts no longer repeat across panels.
+- The header is one line: state, path with the project highlighted, session and clock.
+- The four token cards are rows in the **Cost** panel; the main / agents split shows only when there are agents.
+- In **Context**, memory files nest under their category and the deferred MCP tool count joins its row.
+- Empty agent and task panels collapse into one line; the timeline shows only once there are agents.
+- The log is **Activity**, without the tag column.
+
+### Removed
+
+- The model legend, the team line, the **Who sees what** panel (the agent table has the tokens) and the status line (the band above the prompt shows the same).
+
 ## 2.1.1 (2026-11-10)
 
 ### Fixed

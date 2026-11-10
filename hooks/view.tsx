@@ -3,7 +3,7 @@ import type { AgentInfo, Elements, RenderChildren, SessionUsage } from 'claude-c
 
 import type { CtxView, Mon, Owner, Task } from '../types'
 import {
-  C, LANE, PIE, SPIN, STALL_MS, bar, fit, fmtCost, fmtDur, fmtRate, fmtTok, hhmmss, hitRate, modelColor,
+  C, LANE, SPIN, STALL_MS, bar, fit, fmtCost, fmtDur, fmtRate, fmtTok, hhmmss, hitRate, modelColor,
   prettyModel, rates, sparkline, sumTok, vlen, zero, addTok,
 } from './lib'
 
@@ -22,10 +22,76 @@ type Input = {
 }
 type AgentState = 'run' | 'stall' | 'wait' | 'done' | 'fail' | 'stop'
 type Seg = [string, string?, ('b' | 'i' | 's' | 'd')?]
+/** Something a person should look at: its text and its color (red = act now, gold = watch). */
+type Alert = [string, string]
 
+const IDLE_BG = '#4e4e4e'
 const PILL: Record<string, [string, string]> = {
-  run: ['RUN', C.green], stall: ['IDLE?', C.gold], wait: ['WAIT', C.blue], done: ['DONE', '#4e4e4e'],
+  run: ['RUN', C.green], stall: ['IDLE?', C.gold], wait: ['WAIT', C.blue], done: ['DONE', IDLE_BG],
   fail: ['FAIL', C.red], stop: ['STOP', C.orange],
+}
+const ERR_WINDOW = 300_000
+const LIMIT_LABEL = (kind: string) => (kind === 'five_hour' ? '5h limit' : kind === 'seven_day' ? '7d limit' : kind.replace(/_/g, ' '))
+
+/** Each subagent's state, from the engine's agent list and what the monitor recorded. */
+function classify(m: Mon, agents: AgentInfo[], now: number): Map<string, AgentState> {
+  const info = new Map(agents.map(a => [a.id, a.status]))
+  const out = new Map<string, AgentState>()
+  for (const id of m.order.slice(1)) {
+    const o = m.owners[id]
+    if (!o) continue
+    const st = info.get(id)
+    const busy = m.tasks.some(t => t.owner === id && t.state === 'run')
+    out.set(id,
+      st === 'completed' ? 'done'
+      : st === 'failed' ? 'fail'
+      : st === 'killed' ? 'stop'
+      : st === 'waiting' || (st === 'idle' && busy) ? 'wait'
+      : st === 'running' || st === 'pending' || (!st && !o.report && now - o.last < 20_000)
+        ? (o.flights.length === 0 && now - o.last > STALL_MS ? 'stall' : 'run')
+      : 'done')
+  }
+  return out
+}
+
+/** The engine's exact total, and the factor that scales the monitor's own estimate to it. */
+function billOf(m: Mon, usage: SessionUsage) {
+  const est = m.order.reduce((s, id) => s + (m.owners[id] ? sumTok(m.owners[id]!.usd) : 0), 0)
+  const exact = usage.cost?.usd ?? est
+  return { exact, k: est > 0 ? exact / est : 1 }
+}
+
+/** Dollars per hour over the last ten minutes. */
+const burnOf = (m: Mon, now: number, k: number) => m.samples.filter(([ts]) => ts >= now - 600_000).reduce((s, [, v]) => s + v, 0) * 6 * k
+
+/** What needs a person's attention now, most urgent first. */
+export function attention(m: Mon, cx: CtxView | null, usage: SessionUsage, agents: AgentInfo[], now: number): Alert[] {
+  const out: Alert[] = []
+  const main = m.owners.main!
+  const states = classify(m, agents, now)
+  for (const [id, s] of states) {
+    const o = m.owners[id]!
+    if (s === 'fail') out.push([`${o.label} failed`, C.red])
+    if (s === 'stall') out.push([`${o.label} silent for ${fmtDur(now - o.last)}`, C.gold])
+  }
+  for (const t of m.tasks) if (t.state === 'fail' && now - t.end < 1_800_000) out.push([`task “${fit(t.desc, 30)}” failed`, C.red])
+  const window = cx?.window ?? usage.context.window
+  const buffer = cx?.rows.find(r => r.kind === 'buffer')?.tokens ?? 0
+  const usable = window - buffer
+  const pct = usable > 0 ? ((usage.context.tokens ?? main.ctx) / usable) * 100 : 0
+  if (pct >= 80) out.push([`context ${pct.toFixed(0)}% full, autocompact is near`, pct >= 90 ? C.red : C.gold])
+  for (const l of usage.rateLimits) {
+    if (l.percentUsed < 80) continue
+    const reset = l.resetsAt ? `, resets ${hhmmss(Date.parse(l.resetsAt)).slice(0, 5)}` : ''
+    out.push([`${LIMIT_LABEL(l.kind)} at ${l.percentUsed.toFixed(0)}%${reset}`, l.percentUsed >= 90 ? C.red : C.gold])
+  }
+  const burn = burnOf(m, now, billOf(m, usage).k)
+  if (burn > 20) out.push([`burning ${fmtCost(burn)}/h`, C.red])
+  const errs = m.order.reduce((n, id) => n + (m.owners[id]?.errs.filter(ts => now - ts < ERR_WINDOW).length ?? 0), 0)
+  if (errs >= 3) out.push([`${errs} tool errors in the last 5m`, errs >= 6 ? C.red : C.gold])
+  const fl = main.flights.at(-1)
+  if (fl && now - fl.ts > STALL_MS) out.push([`main: ${fit(fl.desc, 30)} running ${fmtDur(now - fl.ts)}`, C.gold])
+  return out.sort((a, b) => Number(b[1] === C.red) - Number(a[1] === C.red))
 }
 
 export function drawMonitor({ Box, Text }: Els, I: Input) {
@@ -37,28 +103,14 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
   const main = m.owners.main!
   const subs = m.order.slice(1).map(id => m.owners[id]!).filter(Boolean)
   const all = [main, ...subs]
-  const est = all.reduce((s, o) => s + sumTok(o.usd), 0)
-  const exact = usage.cost?.usd ?? est
-  const k = est > 0 ? exact / est : 1
+  const { exact, k } = billOf(m, usage)
   const cost = (o: Owner) => sumTok(o.usd) * k
   const tok = all.reduce((t, o) => addTok(t, o.tok), zero())
   const usd = all.reduce((t, o) => addTok(t, o.usd), zero())
   const nocache = all.reduce((s, o) => s + o.nocache, 0) * k
   const subCost = subs.reduce((s, o) => s + cost(o), 0)
-  const info = new Map(I.agents.map(a => [a.id, a]))
   const tasksOf = (id: string) => m.tasks.filter(t => t.owner === id)
-  const stateOf = (o: Owner): AgentState => {
-    const st = info.get(o.id)?.status
-    if (st === 'completed') return 'done'
-    if (st === 'failed') return 'fail'
-    if (st === 'killed') return 'stop'
-    if (st === 'waiting' || (st === 'idle' && tasksOf(o.id).some(t => t.state === 'run'))) return 'wait'
-    if (st === 'running' || st === 'pending' || (!st && !o.report && now - o.last < 20_000)) {
-      return o.flights.length === 0 && now - o.last > STALL_MS ? 'stall' : 'run'
-    }
-    return 'done'
-  }
-  const states = new Map(subs.map(o => [o.id, stateOf(o)]))
+  const states = classify(m, I.agents, now)
   const running = subs.filter(o => ['run', 'stall'].includes(states.get(o.id)!)).length
   const runTasks = m.tasks.filter(t => t.state === 'run').length
   const flight = main.flights.at(-1)
@@ -70,7 +122,7 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
   const window = cx?.window ?? usage.context.window
   const ctxTok = usage.context.tokens ?? main.ctx
   const buffer = cx?.rows.find(r => r.kind === 'buffer')?.tokens ?? 0
-  const burn = m.samples.filter(([ts]) => ts >= now - 600_000).reduce((s, [, v]) => s + v, 0) * 6 * k
+  const burn = burnOf(m, now, k)
   const buckets = Array<number>(30).fill(0)
   for (const [ts, v] of m.samples) {
     const age = Math.trunc((now - ts) / 60_000)
@@ -79,6 +131,7 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
   const r = rates(main.model)
   const mcol = modelColor(main.model)
   const colorOf = (o: Owner) => (o.id === 'main' ? mcol : LANE[(subs.indexOf(o) + 1) % LANE.length]!)
+  const alerts = attention(m, cx, usage, I.agents, now)
 
   // ── Drawing helpers ────────────────────────────────────────────────────────
   const seg = ([text, color, style]: Seg) => (
@@ -97,12 +150,7 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
       {line(...right)}
     </Box>
   )
-  const center = (...segs: (Seg | false | undefined)[]) => (
-    <Box flexDirection="row" justifyContent="center">
-      {line(...segs)}
-    </Box>
-  )
-  const panel = (title: Seg[], color: string, body: RenderChildren[], right?: Seg[], width?: number) => (
+  const panel = (title: Seg[], color: string, body: RenderChildren[], right?: (Seg | false)[], width?: number) => (
     <Box flexDirection="column" borderStyle="round" borderColor={color} paddingX={1} width={width} flexGrow={width ? 0 : 1}>
       {right ? spread(title, right) : line(...title)}
       {body}
@@ -113,121 +161,94 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
     return [[on, color], [off, C.track]]
   }
   const pill = (label: string, bg: string) => (
-    <Text mono backgroundColor={bg} color={bg === PILL.done![1] ? '#eeeeee' : '#000000'} bold>
+    <Text mono backgroundColor={bg} color={bg === IDLE_BG ? '#eeeeee' : '#000000'} bold>
       {` ${label} `.padEnd(7)}
     </Text>
   )
 
-  // ── Header ─────────────────────────────────────────────────────────────────
-  const project = (I.cwd.split('/').pop() || '/').toUpperCase()
-  const alerts: Seg[] = []
-  for (const o of subs) {
-    const s = states.get(o.id)
-    if (s === 'stall') alerts.push([`⚠ ${o.label} idle ${fmtDur(now - o.last)}`, C.gold])
-    if (s === 'fail') alerts.push([`✗ ${o.label} failed`, C.red])
-  }
-  for (const t of m.tasks) if (t.state === 'fail' && now - t.end < 1_800_000) alerts.push([`✗ task ${fit(t.desc, 24)} failed`, C.red])
-  const usable = window - buffer
-  const pctUse = usable > 0 ? (ctxTok / usable) * 100 : 0
-  if (pctUse >= 80) alerts.push([`⚠ context ${pctUse.toFixed(0)}% of usable`, pctUse >= 90 ? C.red : C.gold])
-  const legendLong: Seg[] = [
-    ['■ ', mcol], [prettyModel(main.model) + ' · main  '], ['■ ', C.orange], ['input ' + fmtRate(r.in) + '  '],
-    ['■ ', C.pink], ['cache write ' + fmtRate(r.cw) + '  '], ['■ ', C.blue], ['cache read ' + fmtRate(r.cr) + '  '],
-    ['■ ', C.gold], ['output ' + fmtRate(r.out) + '  '], ['per MTok', C.gray],
-  ]
-  const legendShort: Seg[] = [
-    ['■ ', C.orange], ['in ' + fmtRate(r.in) + '  '], ['■ ', C.pink], ['cw ' + fmtRate(r.cw) + '  '],
-    ['■ ', C.blue], ['cr ' + fmtRate(r.cr) + '  '], ['■ ', C.gold], ['out ' + fmtRate(r.out)],
-  ]
+  // ── Header: state, where, when ─────────────────────────────────────────────
+  const path = I.cwd.replace(I.home, '~')
+  const cut = path.lastIndexOf('/')
+  const parent = cut >= 0 ? path.slice(0, cut + 1) : ''
+  const project = path.slice(cut + 1) || '/'
   const header = (
-    <Box flexDirection="column">
-      <Box flexDirection="row" justifyContent="center" columnGap={1}>
-        {active ? pill('● LIVE', C.green) : pill('IDLE', PILL.done![1])}
-        {line(['✳ CLAUDE CODE MONITOR', undefined, 'b'], ['  ·  ', C.dark], [fit(project, Math.max(8, W - 50)), C.orange, 'b'], ['  ·  ', C.dark], [fmtCost(exact), C.gold, 'b'])}
+    <Box flexDirection="row" justifyContent="space-between" columnGap={1}>
+      <Box flexDirection="row" columnGap={1}>
+        {active ? pill('● LIVE', C.green) : pill('IDLE', IDLE_BG)}
+        {line([fit(parent, Math.max(0, W - project.length - 30)), C.gray], [project, C.orange, 'b'])}
       </Box>
-      {center([fit(`${I.cwd.replace(I.home, '~')}  ·  session ${I.sid.slice(0, 8)}  ·  ${hhmmss(now)}`, W), C.gray])}
-      {line(['═'.repeat(W), C.frame])}
-      {center(...(legendLong.reduce((n, s) => n + vlen(s[0]), 0) <= W ? legendLong : legendShort))}
-      {alerts.length > 0 && center(...alerts.flatMap((a, i): Seg[] => (i ? [['  ·  ', C.dark], a] : [a])))}
+      {line([I.sid.slice(0, 8) + '  ', C.dark], [hhmmss(now), C.gray])}
     </Box>
   )
 
-  // ── Main loop, meters ──────────────────────────────────────────────────────
+  // ── Needs attention ────────────────────────────────────────────────────────
+  const hot = alerts.some(a => a[1] === C.red)
+  const attentionBox = alerts.length > 0 && panel(
+    [['⚠ NEEDS ATTENTION', hot ? C.red : C.gold, 'b']], hot ? C.red : C.gold,
+    alerts.map(([text, col]) => line(['● ', col], [fit(text, W - 6), col])),
+    [[String(alerts.length), hot ? C.red : C.gold, 'b']],
+  )
+
+  // ── Main loop ──────────────────────────────────────────────────────────────
   const stateSeg: Seg = state === 'idle' ? ['○ idle', C.gray] : [spin + ' ' + state, C.green]
   const doing: Seg[] = flight && state === 'working'
-    ? [['» ' + fit(flight.desc, W - 16), C.gold], [` (${fmtDur(now - flight.ts)})`, C.gray]]
-    : [['» ' + fit(main.action || 'waiting for prompt', W - 8), C.gold]]
+    ? [['» ' + fit(flight.desc, W - 16), C.gold], [` ${fmtDur(now - flight.ts)}`, C.gray]]
+    : [['» ' + fit(main.action || 'waiting for prompt', W - 8), state === 'idle' ? C.light : C.gold]]
   const mainBox = (
-    <Box flexDirection="column" borderStyle="round" borderColor={state === 'idle' ? C.dark : mcol} paddingX={1} alignItems="center">
-      {line([prettyModel(main.model), mcol, 'b'], [' · ', C.dark], ['main session '], stateSeg)}
+    <Box flexDirection="column" borderStyle="round" borderColor={state === 'idle' ? C.frame : mcol} paddingX={1}>
+      {spread(
+        [[prettyModel(main.model), mcol, 'b'], !!main.effort && [' · effort ', C.gray], !!main.effort && [main.effort, C.pink]],
+        [stateSeg, [' · ' + fmtDur(t1 - t0), C.gray]],
+      )}
       {line(...doing)}
-      {line(
-        !!main.effort && ['effort ', C.gray], !!main.effort && [main.effort + ' · ', C.pink],
-        ['context '], [ctxTok.toLocaleString('en-US'), undefined, 'b'], [' / ' + fmtTok(window), C.gray], [' · ', C.dark],
-        ['cache '], [(hitRate(main.tok) * 100).toFixed(0) + '%', C.blue, 'b'], [' · ', C.dark], [fmtDur(t1 - t0), C.gray],
-      )}
-    </Box>
-  )
-  const team = center(
-    [`delegate · ${subs.length} agents · `, C.gray], [`${running} live`, running ? C.green : C.gray], [' · ', C.gray],
-    [`${runTasks} bg tasks`, runTasks ? C.cyan : C.gray], ['  ·  ', C.dark], [(hitRate(tok) * 100).toFixed(0) + '% cache hits', C.blue, 'b'],
-  )
-  const perRow = W >= 64 ? 4 : 2
-  const cardW = Math.floor((W - (perRow - 1)) / perRow)
-  const mi = Math.max(4, cardW - 4)
-  const totUsd = sumTok(usd) || 1
-  const meters = (
-    <Box flexDirection="row" flexWrap="wrap" columnGap={1} rowGap="sm">
-      {([['in', 'input', 'uncached', C.orange], ['cw', 'cache write', 'written', C.pink], ['cr', 'cache read', 'hits', C.blue], ['out', 'output', 'generated', C.gold]] as const).map(
-        ([key, name, sub, col]) => (
-          <Box flexDirection="column" borderStyle="round" borderColor={col} paddingX={1} width={cardW} alignItems="center">
-            {line([fit(name, mi), undefined, 'b'])}
-            {line([fit(`${sub} · ${fmtTok(tok[key])}`, mi), C.gray])}
-            {line(...barSegs(usd[key] / totUsd, mi, col))}
-            {line([fmtCost(usd[key] * k), col, 'b'])}
-            {line(active ? [fit(PIE[tick % 4] + ' counting', mi), C.gold] : [fit('✓ final', mi), C.gray])}
-          </Box>
-        ),
-      )}
     </Box>
   )
 
-  // ── The bill ───────────────────────────────────────────────────────────────
+  // ── Cost ───────────────────────────────────────────────────────────────────
   const side = W >= 76 ? Math.floor((W - 1) / 2) : W
   const bi = side - 4
+  const totUsd = sumTok(usd) || 1
+  const kbw = Math.max(4, bi - 31)
+  const kinds = [['in', 'input', C.orange], ['cw', 'cache write', C.pink], ['cr', 'cache read', C.blue], ['out', 'output', C.gold]] as const
   const saved = nocache > 0 ? Math.max(0, 1 - exact / nocache) * 100 : 0
   const burnCol = burn > 20 ? C.red : burn > 5 ? C.gold : C.green
-  const spark = sparkline(buckets.slice(-bi))
+  const sw = Math.max(6, Math.min(30, bi - 29))
+  const spark = sparkline(buckets.slice(-sw))
+  const lbw = Math.max(4, bi - 22)
   const limits = usage.rateLimits.map(l => {
-    const label = l.kind === 'five_hour' ? '5h limit' : l.kind === 'seven_day' ? '7d limit' : l.kind.replace(/_/g, ' ')
     const col = l.percentUsed >= 90 ? C.red : l.percentUsed >= 70 ? C.gold : C.green
-    const reset = l.resetsAt ? ' · ' + hhmmss(Date.parse(l.resetsAt)).slice(0, 5) : ''
-    return spread([[label, C.gray]], [[l.percentUsed.toFixed(0) + '%', col, 'b'], [reset, C.gray]])
+    return line(
+      [LIMIT_LABEL(l.kind).padEnd(9), C.gray], ...barSegs(l.percentUsed / 100, lbw, col),
+      [(l.percentUsed.toFixed(0) + '%').padStart(5), col, 'b'], [l.resetsAt ? ' ↻' + hhmmss(Date.parse(l.resetsAt)).slice(0, 5) : '', C.dark],
+    )
   })
-  const bill = panel([['THE BILL', C.gold, 'b']], C.gold, [
-    line([fit(`${prettyModel(main.model).toLowerCase()} · ${fmtRate(r.in)} in · ${fmtRate(r.out)} out /MTok`, bi), C.gray]),
-    spread([['total', undefined, 'b']], [[fmtCost(exact), C.gold, 'b']]),
-    spread([['main', C.gray]], [[fmtCost(cost(main)), C.gold]]),
-    spread([[`agents (${subs.length})`, C.gray]], [[fmtCost(subCost), C.gold]]),
-    line(['']),
-    spread([['cache hits', C.gray]], [[(hitRate(tok) * 100).toFixed(0) + '%', C.blue, 'b']]),
-    spread([['no cache', C.gray]], [[fmtCost(nocache), C.red, 's']]),
-    spread([['saved', C.gray]], [[saved.toFixed(0) + '%', C.green, 'b']]),
-    line(['']),
-    spread([['burn (10m)', C.gray]], [[fmtCost(burn) + '/h', burnCol, 'b']]),
-    line(...spark.map((s): Seg => [s.ch, s.on ? C.gold : C.track])),
-    <Box width={Math.min(bi, 30)} flexDirection="row" justifyContent="space-between">{line(['-30m', C.dark])}{line(['now', C.dark])}</Box>,
-    limits.length > 0 && line(['']),
+  const bill = panel([['COST', C.gold, 'b']], C.gold, [
+    line([fit(`${prettyModel(main.model)} · ${fmtRate(r.in)} in · ${fmtRate(r.out)} out /MTok`, bi), C.gray]),
+    ...kinds.map(([key, name, col]) => line(
+      ['■ ', col], [name.padEnd(12), C.light], [fmtTok(tok[key]).padStart(7) + ' ', C.gray],
+      ...barSegs(usd[key] / totUsd, kbw, col), [fmtCost(usd[key] * k).padStart(9), col],
+    )),
+    subs.length > 0 && spread([['main ', C.gray], [fmtCost(cost(main)), C.gold]], [[`agents (${subs.length}) `, C.gray], [fmtCost(subCost), C.gold]]),
+    spread(
+      [['cache hit ', C.gray], [(hitRate(tok) * 100).toFixed(0) + '%', C.blue, 'b']],
+      [['saved ', C.gray], [saved.toFixed(0) + '%', C.green, 'b'], [' of ', C.dark], [fmtCost(nocache), C.gray, 's']],
+    ),
+    spread(
+      [['burn ', C.gray], [fmtCost(burn) + '/h', burnCol, 'b']],
+      [['-30m ', C.dark], ...spark.map((s): Seg => [s.ch, s.on ? C.gold : C.track]), [' now', C.dark]],
+    ),
     ...limits,
-  ], undefined, side)
+  ], [[fmtCost(exact), C.gold, 'b']], side)
 
   // ── Context ────────────────────────────────────────────────────────────────
   const lim = window || 1
   const pct = (ctxTok / lim) * 100
-  const pctCol = pct > 75 ? C.red : pct > 50 ? C.gold : undefined
+  const pctCol = pct > 75 ? C.red : pct > 50 ? C.gold : C.light
   const used = (cx?.rows ?? []).filter(x => x.kind === 'used')
   const free = cx?.rows.find(x => x.kind === 'free')
   const deferred = (cx?.rows ?? []).filter(x => x.kind === 'deferred')
+  const mcpN = cx?.mcpDeferred ?? 0
+  const mcpRow = deferred.find(x => /mcp/i.test(x.name))
   const catCol = (i: number) => LANE[i % LANE.length]!
   const ctxBar: Seg[] = []
   let acc = 0
@@ -246,31 +267,19 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
       {line([fmtTok(tokens).padStart(7)], [((tokens / lim) * 100).toFixed(1).padStart(6) + '%', C.gray])}
     </Box>
   )
-  const context = panel([['CONTEXT', undefined, 'b']], C.frame, [
-    spread([[pct.toFixed(0) + '% used', pctCol, 'b']], [[`${fmtTok(ctxTok)} / ${fmtTok(lim)}`, C.gray]]),
+  const memRows = (cx?.memory ?? []).map(f =>
+    line(['  └ ', C.dark], [fit(f.name, nw - 2).padEnd(nw - 2), C.gray], [fmtTok(f.tokens).padStart(7), C.gray]),
+  )
+  const context = panel([['CONTEXT', undefined, 'b'], [' · ', C.dark], [pct.toFixed(0) + '%', pctCol, 'b']], C.frame, [
     line(...ctxBar),
-    ...used.map((x, i) => ctxRow(['■', catCol(i)], x.name, x.tokens)),
+    ...used.flatMap((x, i) => [ctxRow(['■', catCol(i)], x.name, x.tokens), ...(/memory/i.test(x.name) ? memRows : [])]),
     buffer > 0 && ctxRow(['■', C.dark], 'Autocompact buffer', buffer),
     free && ctxRow(['■', C.track], 'Free space', free.tokens, C.gray),
     !cx && line(['measuring after the first turn…', C.dark]),
-    (deferred.length > 0 || (cx?.mcpDeferred ?? 0) > 0) && line(['']),
-    ...deferred.map(x => spread([['□ ', C.dark], [fit(x.name, bi - 12), C.gray]], [[fmtTok(x.tokens), C.gray]])),
-    (cx?.mcpDeferred ?? 0) > 0 && spread([['□ ', C.dark], ['MCP tools not loaded', C.gray]], [[`${cx!.mcpDeferred} tools`, C.gray]]),
-    (cx?.memory.length ?? 0) > 0 && spread([['▾ Memory files', C.gray]], [[String(cx!.memory.length), C.gray]]),
-    ...(cx?.memory ?? []).map(f => spread([['  └ ', C.dark], [fit(f.name, bi - 14), C.light]], [[fmtTok(f.tokens)]])),
-  ], undefined, side)
-
-  // ── Who sees what ──────────────────────────────────────────────────────────
-  const totalTok = sumTok(tok) || 1
-  const ranked = [...subs].sort((a, b) => sumTok(b.tok) - sumTok(a.tok))
-  const top = ranked.slice(0, 4)
-  const shareRows: [string, number, string][] = [['main', sumTok(main.tok), mcol], ...top.map((o): [string, number, string] => [o.label, sumTok(o.tok), colorOf(o)])]
-  if (ranked.length > top.length) shareRows.push([`+${ranked.length - top.length} others`, ranked.slice(top.length).reduce((s, o) => s + sumTok(o.tok), 0), C.gray])
-  const lw = Math.max(8, Math.min(22, Math.floor((W - 4) / 3)))
-  const bw = Math.max(4, W - 4 - lw - 1 - 12)
-  const share = panel([['WHO SEES WHAT', undefined, 'b'], [' · tokens', C.gray]], C.frame, shareRows.map(([name, n, col]) =>
-    line([fit(name, lw).padEnd(lw) + ' ', col], ...barSegs(n / totalTok, bw, col), [fmtTok(n).padStart(7) + (((n / totalTok) * 100).toFixed(0) + '%').padStart(5), C.gray]),
-  ))
+    (deferred.length > 0 || mcpN > 0) && line(['deferred · not in context', C.dark]),
+    ...deferred.map(x => spread([['□ ', C.dark], [fit(x.name, bi - 22), C.gray]], [[(x === mcpRow && mcpN ? `${mcpN} tools · ` : '') + fmtTok(x.tokens), C.gray]])),
+    !mcpRow && mcpN > 0 && spread([['□ ', C.dark], ['MCP tools not loaded', C.gray]], [[`${mcpN} tools`, C.gray]]),
+  ], [[`${fmtTok(ctxTok)} / ${fmtTok(lim)}`, C.gray]], side)
 
   // ── Agents ─────────────────────────────────────────────────────────────────
   const ai = W - 4
@@ -314,16 +323,14 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
     return [row, line(['        └ ', C.dark], [fit(meta, Math.max(10, Math.floor((ai * 2) / 5))), C.gray], !!say && [' │ ', C.dark], !!say && [fit('“' + say + '”', ai - 12 - vlen(meta)), C.light, 'i'])]
   })
   const rest = subs.slice(SHOW)
-  const agentsBox = panel([['AGENTS', undefined, 'b'], [` · ${subs.length}`, C.gray]], C.frame, subs.length === 0
-    ? [line(['no subagents spawned yet — delegate with the Agent tool and they show up here', C.dark])]
-    : [
-        line([
-          'STATE   ' + 'AGENT'.padEnd(nameW + 1) + ' ' + 'NOW'.padEnd(nowW + 1) + 'STEPS'.padStart(6) + (compact ? '' : 'TIME'.padStart(9) + 'TOKENS'.padStart(8)) + 'COST'.padStart(8),
-          C.dark,
-        ]),
-        ...agentRows,
-        rest.length > 0 && line([`  +${rest.length} more · ${fmtTok(rest.reduce((s, o) => s + sumTok(o.tok), 0))} · ${fmtCost(rest.reduce((s, o) => s + cost(o), 0))}`, C.dark]),
-      ], agentRight)
+  const agentsBox = subs.length > 0 && panel([['AGENTS', undefined, 'b'], [` · ${subs.length}`, C.gray]], C.frame, [
+    line([
+      'STATE   ' + 'AGENT'.padEnd(nameW + 1) + ' ' + 'NOW'.padEnd(nowW + 1) + 'STEPS'.padStart(6) + (compact ? '' : 'TIME'.padStart(9) + 'TOKENS'.padStart(8)) + 'COST'.padStart(8),
+      C.dark,
+    ]),
+    ...agentRows,
+    rest.length > 0 && line([`  +${rest.length} more · ${fmtTok(rest.reduce((s, o) => s + sumTok(o.tok), 0))} · ${fmtCost(rest.reduce((s, o) => s + cost(o), 0))}`, C.dark]),
+  ], agentRight)
 
   // ── Background tasks ───────────────────────────────────────────────────────
   const ownerName = (id: string) => (id === 'main' ? 'main' : m.owners[id]?.label ?? id.slice(0, 6))
@@ -336,20 +343,21 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
     : t.state === 'fail' ? ['failed', C.red] : t.state === 'stop' ? ['stopped', C.gold] : ['done', C.gray]
   const shownTasks = m.tasks.slice(0, 8)
   const fails = m.tasks.filter(t => t.state === 'fail').length
-  const tasksBox = panel([['BACKGROUND TASKS', undefined, 'b']], C.frame, m.tasks.length === 0
-    ? [line(['no background tasks (run_in_background / Monitor)', C.dark])]
-    : [
-        ...shownTasks.flatMap(t => [
-          line(
-            icon(t), [' ' + fit((t.kind === 'monitor' ? '⌁ ' : '') + t.desc, descW).padEnd(descW) + ' ', t.state === 'fail' ? C.red : t.state === 'run' ? undefined : C.light],
-            [fit(ownerName(t.owner), ownW).padEnd(ownW), ownerCol(t.owner)], [fmtDur((t.end || now) - t.start).padStart(10), C.gray], [' ' + result(t)[0].padStart(12), result(t)[1]],
-          ),
-          t.state === 'run' && !!t.note && line(['  └ ', C.dark], [fit(t.note, ai - 4), C.gray]),
-        ]),
-        m.tasks.length > shownTasks.length && line([`  +${m.tasks.length - shownTasks.length} older`, C.dark]),
-      ], [[`${runTasks} running  `, runTasks ? C.green : C.gray], [`${m.tasks.length - runTasks} finished`, C.gray], [fails ? `  ${fails} failed` : '', C.red]])
+  const tasksBox = m.tasks.length > 0 && panel([['BACKGROUND TASKS', undefined, 'b']], C.frame, [
+    ...shownTasks.flatMap(t => [
+      line(
+        icon(t), [' ' + fit((t.kind === 'monitor' ? '⌁ ' : '') + t.desc, descW).padEnd(descW) + ' ', t.state === 'fail' ? C.red : t.state === 'run' ? undefined : C.light],
+        [fit(ownerName(t.owner), ownW).padEnd(ownW), ownerCol(t.owner)], [fmtDur((t.end || now) - t.start).padStart(10), C.gray], [' ' + result(t)[0].padStart(12), result(t)[1]],
+      ),
+      t.state === 'run' && !!t.note && line(['  └ ', C.dark], [fit(t.note, ai - 4), C.gray]),
+    ]),
+    m.tasks.length > shownTasks.length && line([`  +${m.tasks.length - shownTasks.length} older`, C.dark]),
+  ], [[`${runTasks} running  `, runTasks ? C.green : C.gray], [`${m.tasks.length - runTasks} finished`, C.gray], [fails ? `  ${fails} failed` : '', C.red]])
 
-  // ── Timeline ───────────────────────────────────────────────────────────────
+  const nothingDelegated = subs.length === 0 && m.tasks.length === 0 &&
+    line(['  no subagents spawned yet · no background tasks', C.dark])
+
+  // ── Timeline: only worth a panel once there is more than one lane ─────────
   const span = Math.max(1000, t1 - t0)
   const labelW = Math.max(11, Math.min(18, Math.floor(W / 8)))
   const tw = Math.max(10, W - 4 - labelW)
@@ -367,55 +375,38 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
     }
     return line(...segs)
   })
-  const mid = hhmmss(t0 + span / 2)
-  const left = hhmmss(t0)
-  const axis = ' '.repeat(labelW) + left + ' '.repeat(Math.max(1, Math.floor(tw / 2) - left.length - Math.floor(mid.length / 2))) + mid
-  const timeline = panel([['SESSION TIMELINE', undefined, 'b'], [' · ' + fmtDur(span), C.gray]], C.frame, [
+  const timeline = subs.length > 0 && panel([['TIMELINE', undefined, 'b']], C.frame, [
     ...lanes,
-    <Box flexDirection="row" justifyContent="space-between" width={labelW + tw}>{line([axis, C.gray])}{line([active ? 'now' : hhmmss(t1), C.gray])}</Box>,
-  ])
+    <Box flexDirection="row" justifyContent="space-between" width={labelW + tw}>
+      {line([' '.repeat(labelW) + hhmmss(t0), C.dark])}
+      {line([active ? 'now' : hhmmss(t1), C.dark])}
+    </Box>,
+  ], [[fmtDur(span), C.gray]])
 
-  // ── Log tail ───────────────────────────────────────────────────────────────
+  // ── Activity ───────────────────────────────────────────────────────────────
   const whoW = Math.max(9, Math.min(16, Math.floor(ai / 7)))
   const whoCol = (who: string) => (who === 'you' ? C.green : who === 'main' ? mcol : subs.find(o => o.label === who) ? colorOf(subs.find(o => o.label === who)!) : C.gray)
-  const log = panel([['TAIL -F SESSION.LOG', undefined, 'b']], C.frame, m.log.length === 0
+  const log = panel([['ACTIVITY', undefined, 'b']], C.frame, m.log.length === 0
     ? [line(['nothing yet', C.dark])]
-    : m.log.slice(-12).map(ev =>
-        spread(
-          [[hhmmss(ev.ts) + '  ', C.dark], [fit(ev.who, whoW).padEnd(whoW) + ' ', whoCol(ev.who)], [fit(ev.text, ai - whoW - 14 - ev.tag.length), ev.tag === 'fail' ? C.red : ev.tag === 'say' ? undefined : C.light, ev.tag === 'say' ? 'i' : undefined]],
-          [[`[${ev.tag}]`, ev.tag === 'fail' ? C.red : C.dark]],
-        ),
-      ))
-
-  // ── Status ─────────────────────────────────────────────────────────────────
-  const st = (key: string, value: string, c: string): Seg[] => [[key + ' ', C.gray], ['[' + value + ']  ', c]]
-  const status = line(
-    ['❯ ', C.green],
-    ...st('model', prettyModel(main.model), mcol),
-    ...st('effort', main.effort || '—', C.pink),
-    ...st('ctx', `${fmtTok(ctxTok)} ${((ctxTok / lim) * 100).toFixed(0)}%`, C.light),
-    ...st('bill', fmtCost(exact), C.gold),
-    ...st('burn', fmtCost(burn) + '/h', C.gold),
-    ...st('agents', `${running}/${subs.length}`, C.green),
-    ...st('bg', String(runTasks), C.cyan),
-  )
+    : m.log.slice(-10).map(ev => line(
+        [hhmmss(ev.ts) + '  ', C.dark], [fit(ev.who, whoW).padEnd(whoW) + ' ', whoCol(ev.who)],
+        [fit(ev.text, ai - whoW - 11), ev.tag === 'fail' ? C.red : ev.tag === 'say' || ev.tag === 'prompt' ? undefined : C.light, ev.tag === 'say' ? 'i' : undefined],
+      )))
 
   return (
     <Box flexDirection="column" width={W} rowGap="sm">
       {header}
+      {attentionBox}
       {mainBox}
-      {team}
-      {meters}
       <Box flexDirection={side < W ? 'row' : 'column'} columnGap={1} rowGap="sm">
         {bill}
         {context}
       </Box>
-      {share}
       {agentsBox}
       {tasksBox}
+      {nothingDelegated}
       {timeline}
       {log}
-      {status}
     </Box>
   )
 }
@@ -423,15 +414,17 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
 type BandEls = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
 type BandInput = {
   m: Mon
+  cx: CtxView | null
   usage: SessionUsage
   agents: AgentInfo[]
+  now: number
   shown: boolean
   tick: number
   width: number
   onToggle: () => void
 }
 
-/** The one-line band above the prompt: the key figures and the pane's toggle. */
+/** The one-line band above the prompt: the key figures, what needs attention, and the pane's toggle. */
 export function drawBand({ Box, Text, Button }: BandEls, B: BandInput) {
   const { m, usage } = B
   const main = m.owners.main!
@@ -443,6 +436,8 @@ export function drawBand({ Box, Text, Button }: BandEls, B: BandInput) {
   const tokens = usage.context.tokens ?? main.ctx
   const pct = usage.context.percent ?? Math.round((tokens / window) * 100)
   const cost = usage.cost?.usd ?? Object.values(m.owners).reduce((s, o) => s + sumTok(o.usd), 0)
+  const alerts = attention(m, B.cx, usage, B.agents, B.now)
+  const hot = alerts.some(a => a[1] === C.red)
   const seg = (text: string, color?: string, bold?: boolean) => <Text color={color} bold={bold}>{text}</Text>
   const dot = ' · '
   return (
@@ -451,6 +446,7 @@ export function drawBand({ Box, Text, Button }: BandEls, B: BandInput) {
         {seg('◧ MONITOR', undefined, true)}
         {seg(dot, C.dark)}
         {live ? seg(SPIN[B.tick % SPIN.length]! + ' live', C.green) : seg('○ idle', C.gray)}
+        {alerts.length > 0 ? [seg(dot, C.dark), seg(`⚠ ${alerts.length === 1 ? alerts[0]![0] : alerts.length + ' alerts'}`, hot ? C.red : C.gold, true)] : []}
         {seg(dot, C.dark)}
         {seg(fmtCost(cost), C.gold, true)}
         {seg(dot, C.dark)}

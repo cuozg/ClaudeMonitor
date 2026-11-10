@@ -14,14 +14,14 @@ The same mod works in the Claude Code CLI, the Code tab of the Claude Desktop ap
 
 ## Core features
 
-- **The bill**: the session's exact cost (the figure `/cost` shows), split into input, cache write, cache read and output, with the share of the main session and each agent, cache savings and a 10-minute burn rate. The split by kind and owner comes from a price table (`PRICES` in `hooks/lib.ts`), scaled to the exact total.
+- **Cost**: the session's exact cost (the figure `/cost` shows), split into input, cache write, cache read and output, with the share of the main session and each agent, cache savings and a 10-minute burn rate. The split by kind and owner comes from a price table (`PRICES` in `hooks/lib.ts`), scaled to the exact total.
 - **Rate limits**: the 5-hour and 7-day windows, as the last API response reported them.
 - **Context window**: tokens used against the session's window, broken down as `/context` does (system prompt, tools, MCP tools, skills, agents, memory files, messages, autocompact buffer).
 - **Agent team view**: each subagent with its model, state (running, waiting, done, failed, stalled), current tool, steps, time, tokens and cost.
 - **Background tasks**: running and finished background shells, monitors and agents.
-- **Timeline and log**: per-agent activity lanes and recent prompts, tool calls and replies.
-- **Toggle band**: a line above the prompt with the cost, context, running agents and background tasks, and a **Show monitor / Hide monitor** button.
-- **Alerts**: stalled agents (no activity for 3 minutes), failed agents or tasks, and context above 80% / 90% of the usable window.
+- **Timeline and activity**: per-agent activity lanes (once agents exist) and recent prompts, tool calls and replies.
+- **Toggle band**: a line above the prompt with the cost, context, running agents, background tasks and any alert, and a **Show monitor / Hide monitor** button.
+- **Needs attention**: a box at the top of the pane, only when something needs a look: failed or stalled agents (no activity for 3 minutes), failed tasks, context above 80% / 90% of the usable window, a rate limit at 80%+, a burn rate above $20/h, 3+ tool errors in 5 minutes, or a main tool call running over 3 minutes. Red items need action, gold ones are a warning.
 
 ## Requirements
 

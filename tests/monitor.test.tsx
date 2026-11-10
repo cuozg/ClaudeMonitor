@@ -56,7 +56,7 @@ test('the pane shows the bill, context, agents and log on every surface', async 
 
   for (const surface of ['terminal', 'desktop', 'vscode'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
-    expect(await ui.find({ type: 'Text', text: /CLAUDE CODE MONITOR/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^shop$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^\$1\.50$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /read cart\.ts/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /review code/ })).toBeDefined()
@@ -71,6 +71,25 @@ test('an empty session draws without data', async ($, on) => {
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 40 } })
   expect(await ui.find({ type: 'Text', text: /no subagents spawned yet/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /IDLE/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('what needs attention is highlighted in the pane and the band', async ($, on) => {
+  engine(on, { usage: { ...USAGE, rateLimits: [{ kind: 'five_hour', percentUsed: 92 }] }, agents: false, panes: false })
+  on('ui.panes', () => ({ value: [] }))
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await pane.find({ type: 'Text', text: /NEEDS ATTENTION/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /5h limit at 92%/ })).toBeDefined()
+  await pane.unmount()
+  const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await band.find({ type: 'Text', text: /⚠ 5h limit at 92%/ })).toBeDefined()
+  await band.unmount()
+})
+
+test('a calm session shows no attention box', async ($, on) => {
+  engine(on, { agents: false })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ type: 'Text', text: /NEEDS ATTENTION/ })).toBeUndefined()
   await ui.unmount()
 })
 
