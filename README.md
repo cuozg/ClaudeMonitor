@@ -2,9 +2,7 @@
 
 A live dashboard for [Claude Code](https://claude.com/claude-code), built as a Claude Code [mod](https://code.claude.com/docs/en/plugins/mods/overview). It runs inside Claude Code and shows, in a pane beside the chat, what the session costs, how full the context is, and what every subagent and background task is doing.
 
-The same mod works in the Claude Code CLI, the Code tab of the Claude Desktop app, and the VS Code extension. The pane opens by itself when a session starts.
-
-![Claude Monitor preview](assets/demo.png)
+The same mod works in the Claude Code CLI, the Code tab of the Claude Desktop app, and the VS Code extension. The pane opens by itself when a session starts, and a band above the prompt keeps the key figures in view with a button to show or hide the pane.
 
 ## Core features
 
@@ -14,6 +12,7 @@ The same mod works in the Claude Code CLI, the Code tab of the Claude Desktop ap
 - **Agent team view**: each subagent with its model, state (running, waiting, done, failed, stalled), current tool, steps, time, tokens and cost.
 - **Background tasks**: running and finished background shells, monitors and agents.
 - **Timeline and log**: per-agent activity lanes and recent prompts, tool calls and replies.
+- **Toggle band**: a line above the prompt with the cost, context, running agents and background tasks, and a **Show monitor / Hide monitor** button.
 - **Alerts**: stalled agents (no activity for 3 minutes), failed agents or tasks, and context above 80% / 90% of the usable window.
 
 ## Requirements
@@ -51,11 +50,16 @@ Or load a clone directly in every session (CLI, Desktop and VS Code), by adding 
 | `.claude-plugin/plugin.json` | The mod's manifest |
 | `.claude-plugin/marketplace.json` | Lets `/plugin install` find it |
 | `hooks/register.tsx` | Records the session from Claude Code's events and opens the pane |
-| `hooks/view.tsx` | Draws the dashboard |
+| `hooks/view.tsx` | Draws the dashboard and the band above the prompt |
 | `hooks/lib.ts` | Pricing, formatting and tool labels |
 | `types/index.d.ts` | The state the mod keeps |
 | `tests/` | `claude plugin test .` |
-| `_v1/` | The previous Python + tmux + VSCode-extension monitor, kept as a backup |
+| `CHANGELOG.md` | What changed in each version |
+| `_v1/` | The previous Python + tmux + VSCode-extension monitor (1.0.0), kept as a backup, with its preview image |
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## Development
 
