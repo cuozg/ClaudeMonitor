@@ -429,7 +429,7 @@ export function drawBand({ Box, Text, Button }: BandEls, B: BandInput) {
   )
 }
 
-/** The pane: with subagents, their agent-flow grid sits left of the monitor sections (stacked above them when narrow). */
+/** The pane: with subagents, their agent-flow column (one row per agent) sits left of the monitor sections (stacked above them when narrow). */
 export function drawPane(els: Els, I: Input & { rows: number }) {
   const { m } = I
   const subs = m.order.slice(1).map(id => m.owners[id]!).filter(Boolean)
@@ -439,7 +439,7 @@ export function drawPane(els: Els, I: Input & { rows: number }) {
   const { k } = billOf(m, I.usage)
   const flowOf = (width: number, height: number) =>
     drawFlow(els, {
-      agents: pickAgents(subs, states), states, now: I.now, tick: I.tick, width, height,
+      agents: pickAgents(subs, states, height), states, now: I.now, tick: I.tick, width, height,
       colorOf: o => LANE[(subs.indexOf(o) + 1) % LANE.length]!, cost: o => sumTok(o.usd) * k,
       window: I.cx?.window ?? I.usage.context.window,
     })

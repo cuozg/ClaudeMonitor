@@ -4,7 +4,7 @@
 
 ### Added
 
-- **Agent flow**: each subagent gets a compact card left of the monitor sections (stacked above them in a narrow pane): state, elapsed time, model, type, context bar, cost, and its recent steps with timings and `+/-` lines for edits. The grid grows 1x1, 1 col x 2 rows, 2x2, 3x2, 3x3; past nine, the oldest finished agents leave first.
+- **Agent flow**: subagents sit in one column left of the monitor sections (stacked above them in a narrow pane), one row each: state, label, model, type, context size and %, cost, elapsed time. When rows run out, the oldest finished agents leave first.
 
 ### Changed
 

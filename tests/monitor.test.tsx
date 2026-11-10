@@ -161,19 +161,15 @@ test('the band above the prompt shows figures and toggles the pane', async ($, o
   }
 })
 
-test('each subagent gets a flow card, laid out 1x1, 1x2, 2x2, 3x2 and 3x3', async ($, on) => {
+test('each subagent gets one flow row in a single column', async ($, on) => {
   engine(on)
   await $.session.start({ cwd: '/Users/me/shop', surface: 'terminal', isInteractive: true })
   const spawn = (i: number) =>
     $.agent.spawn({ tool_use_id: 'tu' + i, prompt: 'p', description: 'task ' + i, subagentType: 'Explore', provider: { plugin: 'engine' }, parentModel: 'claude-opus-5-5', background: false, fork: false } as never)
-  for (let i = 1; i <= 10; i++) {
+  for (let i = 1; i <= 12; i++) {
     await spawn(i)
-    await $.tool.call({ tool: 'Edit', file_path: `/Users/me/shop/f${i}.ts`, old_string: 'a', new_string: 'a\nb\nc', agentId: 'ag' + i } as never)
     const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 200 } })
-    const shown = Math.min(i, 9)
-    for (let j = i - shown + 1; j <= i; j++) expect(await ui.find({ type: 'Text', text: new RegExp('^\\d\\d:\\d\\d . edit f' + j + '\\.ts') })).toBeDefined()
-    if (i === 1) expect(await ui.find({ type: 'Text', text: /\+3/ })).toBeDefined()
-    if (i === 10) expect(await ui.find({ type: 'Text', text: /^\d\d:\d\d . edit f1\.ts/ })).toBeUndefined()
+    for (let j = 1; j <= i; j++) expect(await ui.find({ type: 'Text', text: new RegExp('task ' + j + '\\b') })).toBeDefined()
     await ui.unmount()
   }
 })
