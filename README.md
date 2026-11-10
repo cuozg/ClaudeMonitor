@@ -4,6 +4,14 @@ A live dashboard for [Claude Code](https://claude.com/claude-code), built as a C
 
 The same mod works in the Claude Code CLI, the Code tab of the Claude Desktop app, and the VS Code extension. The pane opens by itself when a session starts, and a band above the prompt keeps the key figures in view with a button to show or hide the pane.
 
+![The monitor pane in the Claude Desktop app](assets/Panel.png)
+
+*The pane beside the chat in the Claude Desktop app.*
+
+![The band above the prompt](assets/Bar.png)
+
+*The band above the prompt, with the Show monitor / Hide monitor button.*
+
 ## Core features
 
 - **The bill**: the session's exact cost (the figure `/cost` shows), split into input, cache write, cache read and output, with the share of the main session and each agent, cache savings and a 10-minute burn rate. The split by kind and owner comes from a price table (`PRICES` in `hooks/lib.ts`), scaled to the exact total.

@@ -6,6 +6,10 @@
 
 - In the CLI the pane no longer has a gray fill of its own: it draws on the terminal's background. Desktop and VS Code are unchanged.
 
+### Docs
+
+- The README shows screenshots of the pane and the band.
+
 ## 2.1.0 (2026-11-10)
 
 ### Added
