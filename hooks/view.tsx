@@ -136,13 +136,13 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
       {segs.filter((s): s is Seg => !!s).map(seg)}
     </Text>
   )
-  const spread = (left: (Seg | false)[], right: (Seg | false)[], w?: number) => (
-    <Box flexDirection="row" justifyContent="space-between" width={w}>
-      {line(...left)}
-      {line(...right)}
-    </Box>
-  )
   const textW = (segs: Seg[]) => segs.reduce((n, s) => n + vlen(s[0]), 0)
+  /** Left and right text on one row, padded with spaces so the right text ends exactly at `w`. */
+  const spread = (left: (Seg | false)[], right: (Seg | false)[], w: number) => {
+    const l = left.filter((s): s is Seg => !!s)
+    const r = right.filter((s): s is Seg => !!s)
+    return line(...l, [' '.repeat(Math.max(1, w - textW(l) - textW(r)))], ...r)
+  }
   /** A quiet section: a bold title, a hairline, a figure at the right, then the body. */
   const section = (title: string, right: Seg[], body: RenderChildren[], w = iw, titleColor: string = C.light) => (
     <Box flexDirection="column" width={w}>
@@ -345,10 +345,7 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
   })
   const timeline = subs.length > 0 && section('Timeline', [[fmtDur(span), C.gray]], [
     ...lanes,
-    <Box flexDirection="row" justifyContent="space-between" width={labelW + tw}>
-      {line([' '.repeat(labelW) + hhmmss(t0), C.dark])}
-      {line([active ? 'now' : hhmmss(t1), C.dark])}
-    </Box>,
+    spread([[' '.repeat(labelW) + hhmmss(t0), C.dark]], [[active ? 'now' : hhmmss(t1), C.dark]], labelW + tw),
   ])
 
   // ── Activity ───────────────────────────────────────────────────────────────
