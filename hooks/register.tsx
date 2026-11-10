@@ -11,11 +11,10 @@ const PANE = 'session-monitor'
 const TITLE = 'Monitor'
 // Asks for the widest dock the terminal allows (45% of its columns).
 const DOCK_COLUMNS = 400
-const MAX_LOG = 300
 const MAX_TS = 400
 const MAX_STEPS = 40
 
-const empty = (): Mon => ({ owners: { main: newOwner('main', 'main') }, order: ['main'], log: [], tasks: [], samples: [], working: false, closed: false, monitorClosed: false, agentsClosed: false })
+const empty = (): Mon => ({ owners: { main: newOwner('main', 'main') }, order: ['main'], tasks: [], samples: [], working: false, closed: false, monitorClosed: false, agentsClosed: false })
 const data = atom({ plugin: 'session-monitor', key: 'data' } as const, empty(), { shape: 'mon-3' })
 const ctx = atom({ plugin: 'session-monitor', key: 'ctx' } as const, null, { shape: 'ctx-1' })
 
@@ -48,8 +47,6 @@ const push = <T,>(list: T[], item: T, cap: number) => {
   list.push(item)
   if (list.length > cap) list.splice(0, list.length - cap)
 }
-
-const logEvent = (m: Mon, ts: number, who: string, text: string, tag: string) => push(m.log, { ts, who, text, tag }, MAX_LOG)
 
 const seen = (o: Owner, ts: number) => {
   if (!o.first) o.first = ts
@@ -191,8 +188,6 @@ export const register: Register = on => {
           if (t.state !== 'run' && !t.end) t.end = now
         }
       })
-    } else if (!e.isMeta && e.origin.kind !== 'peer' && !e.text.trimStart().startsWith('<')) {
-      await edit($, m => logEvent(m, now, 'you', '» ' + firstLine(e.text), 'prompt'))
     }
     return next(e)
   }).catch(($, e, next) => next(e))
@@ -269,7 +264,6 @@ export const register: Register = on => {
         if (say) {
           o.say = o.action = say
           o.sayTs = now
-          logEvent(m, now, o.label, say, 'say')
         }
       })
     }
@@ -294,7 +288,6 @@ export const register: Register = on => {
       }
       seen(o, start)
       push(o.act, start, MAX_TS)
-      logEvent(m, start, o.label, desc, tag)
     })
     const ran = await next(e)
     const end = await $.clock.now()
@@ -312,10 +305,7 @@ export const register: Register = on => {
         step.err = !!(ran.isError || ran.deny)
       }
       seen(o, end)
-      if (ran.isError || ran.deny) {
-        push(o.errs, end, MAX_TS)
-        logEvent(m, end, o.label, '✗ ' + firstLine(ran.deny ?? ran.text ?? 'error'), 'fail')
-      }
+      if (ran.isError || ran.deny) push(o.errs, end, MAX_TS)
       if (bgId) {
         const t: Task = {
           id: bgId, kind: tool === 'Monitor' ? 'monitor' : 'shell', desc: firstLine(inp.description ?? inp.command ?? desc),

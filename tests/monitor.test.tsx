@@ -49,7 +49,7 @@ function engine(on: On, { usage = USAGE as object, agents = true as boolean | ((
   return clock
 }
 
-test('the pane shows the bill, context, agents and log on every surface', async ($, on) => {
+test('the pane shows the bill, context and agents on every surface, without an activity log', async ($, on) => {
   engine(on)
   await $.session.start({ cwd: '/Users/me/shop', surface: 'terminal', isInteractive: true })
   await $.tool.call({ tool: 'Read', file_path: '/Users/me/shop/cart.ts' })
@@ -60,8 +60,7 @@ test('the pane shows the bill, context, agents and log on every surface', async 
     const ui = await $.ui.mount({ ...PANE, surface })
     expect(await ui.find({ type: 'Text', text: /^shop$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^\$1\.50$/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /read cart\.ts/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /Looking at the cart code/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Activity/ })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: /5h limit/ })).toBeDefined()
     await ui.unmount()
   }
@@ -223,8 +222,11 @@ test('the monitor and the subagents share the pane in equal halves', async ($, o
   const wide = await widths(120)
   expect(wide).toContain('"flexDirection":"row-reverse"')
   expect(wide).toContain('"width":60,"height":60')
+  expect(wide).toContain('"width":1,"height":60')
+  expect(wide).toContain('│')
   const narrow = await widths(80)
   expect(narrow).toContain('"width":80,"height":30')
+  expect(narrow).toContain('─'.repeat(80))
 })
 
 test('the wheel over the subagents scrolls them alone; over the monitor it moves nothing', async ($, on) => {

@@ -267,17 +267,15 @@ export function drawMonitor({ Box, Text }: Els, I: Input & { rows?: number }) {
     : t.state === 'fail' ? ['failed', C.red] : t.state === 'stop' ? ['stopped', C.gold] : ['done', C.dark]
   const fails = m.tasks.filter(t => t.state === 'fail').length
   const taskLines = (t: Task) => 1 + Number(t.state === 'run' && !!t.note)
-  /** The pane never scrolls: tasks and activity shrink to the rows left under the fixed blocks. */
+  /** The pane never scrolls: tasks shrink to the rows left under the fixed blocks. */
   const rowsOf = (body: unknown[]) => body.filter(Boolean).length
   // header, then each block under a one-row gap; the cost and context blocks sit side by side when wide
   const topRows = 1 + (side < iw ? Math.max(rowsOf(billBody), rowsOf(contextBody)) : rowsOf(billBody) + 1 + rowsOf(contextBody) + 1)
   const fixedRows = 2 + (doing ? 1 : 0) + (attentionBox ? 1 + alerts.length + 1 : 0) + 1 + topRows
   let taskN = Math.min(8, m.tasks.length)
-  let logN = Math.min(10, m.log.length)
   if (I.rows && I.rows > 0) {
-    const spare = (n: number) => I.rows! - fixedRows - (n > 0 ? 2 + m.tasks.slice(0, n).reduce((s, t) => s + taskLines(t), 0) + Number(m.tasks.length > n) : 0) - 2
-    while (taskN > 0 && spare(taskN) < Math.min(3, logN)) taskN--
-    logN = Math.max(0, Math.min(logN, spare(taskN)))
+    const spare = (n: number) => I.rows! - fixedRows - (n > 0 ? 2 + m.tasks.slice(0, n).reduce((s, t) => s + taskLines(t), 0) + Number(m.tasks.length > n) : 0)
+    while (taskN > 0 && spare(taskN) < 0) taskN--
   }
   const shownTasks = m.tasks.slice(0, taskN)
   const tasksBox = taskN > 0 && section('Background tasks', [
@@ -293,16 +291,6 @@ export function drawMonitor({ Box, Text }: Els, I: Input & { rows?: number }) {
     m.tasks.length > shownTasks.length && line([`  +${m.tasks.length - shownTasks.length} older`, C.dark]),
   ])
 
-  // ── Activity ───────────────────────────────────────────────────────────────
-  const whoW = Math.max(9, Math.min(16, Math.floor(iw / 7)))
-  const whoCol = (who: string) => (who === 'you' ? C.green : who === 'main' ? mcol : subs.find(o => o.label === who) ? colorOf(subs.find(o => o.label === who)!) : C.gray)
-  const log = (logN > 0 || m.log.length === 0) && section('Activity', [[`last ${logN}`, C.dark]], m.log.length === 0
-    ? [line(['nothing yet', C.dark])]
-    : m.log.slice(-logN).map(ev => line(
-        [hhmmss(ev.ts) + '  ', C.dark], [fit(ev.who, whoW).padEnd(whoW) + ' ', whoCol(ev.who)],
-        [fit(ev.text, iw - whoW - 11), ev.tag === 'fail' ? C.red : ev.tag === 'say' || ev.tag === 'prompt' ? undefined : C.gray, ev.tag === 'say' ? 'i' : undefined],
-      )))
-
   return (
     <Box flexDirection="column" width={W} paddingX={1}>
       {[
@@ -314,7 +302,6 @@ export function drawMonitor({ Box, Text }: Els, I: Input & { rows?: number }) {
           {context}
         </Box>,
         tasksBox,
-        log,
       ].filter(Boolean).flatMap((block, i) => (i ? [gap, block] : [block]))}
     </Box>
   )
@@ -383,20 +370,20 @@ const SPLIT_COLUMNS = 100
 
 /**
  * The monitor pane: the monitor alone, the subagents alone, or both in two equal halves: subagents left
- * and monitor right when wide, monitor on top when narrow. The monitor fits its half; the subagents scroll from `offset`.
+ * and monitor right when wide, monitor on top when narrow, with a line between them. The monitor fits its half; the subagents scroll from `offset`.
  */
 export function drawPane(els: Els, I: Input & { rows: number; offset: number; showMonitor: boolean; showAgents: boolean }): { el: RenderChildren; agents?: AgentsBox; max: number } {
   const { m } = I
   const subs = m.order.slice(1).map(id => m.owners[id]!).filter(Boolean)
   if (!I.showAgents || subs.length === 0) return { el: drawMonitor(els, I), max: 0 }
-  const { Box } = els
+  const { Box, Text } = els
   const W = Math.max(30, I.width)
   const wide = W >= SPLIT_COLUMNS
   const half = wide ? Math.floor(W / 2) : Math.floor(I.rows / 2)
   const box: AgentsBox = !I.showMonitor ? { column: 0, row: 0, width: W, height: I.rows }
     : wide ? { column: 0, row: 0, width: half, height: I.rows }
-    : { column: 0, row: half, width: W, height: Math.max(1, I.rows - half) }
-  const monW = wide ? W - half : W
+    : { column: 0, row: half + 1, width: W, height: Math.max(1, I.rows - half - 1) }
+  const monW = wide ? W - half - 1 : W
   const monRows = wide ? I.rows : half
   const states = classify(m, I.agents, I.now)
   const { k } = billOf(m, I.usage)
@@ -411,6 +398,9 @@ export function drawPane(els: Els, I: Input & { rows: number; offset: number; sh
     el: (
       <Box flexDirection={wide ? 'row-reverse' : 'column'} width={W}>
         {I.showMonitor && <Box width={monW} height={monRows} overflow="hidden">{drawMonitor(els, { ...I, width: monW, rows: monRows })}</Box>}
+        {I.showMonitor && (wide
+          ? <Box flexDirection="column" width={1} height={I.rows}>{Array.from({ length: I.rows }, () => <Text mono color={C.track}>│</Text>)}</Box>
+          : <Text mono color={C.track}>{'─'.repeat(W)}</Text>)}
         <Box width={box.width} height={box.height} paddingX={1}>{flow.el}</Box>
       </Box>
     ),

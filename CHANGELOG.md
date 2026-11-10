@@ -14,6 +14,8 @@
 
 ### Changed
 
+- The **Activity** log is gone from the monitor; background tasks take the rows it used.
+- A line separates the monitor and the subagents halves: a horizontal line when they are stacked, a vertical one when they sit side by side.
 - The band above the prompt no longer shows alerts; they stay in the pane's **Needs attention** box.
 - Every row of the pane ends flush at the section's right edge: the two top columns fill the full width, and the rate-limit, context and subagent rows no longer fall a cell short or long.
 - A blank line separates every section of the pane.

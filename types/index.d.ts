@@ -32,9 +32,6 @@ export type Owner = {
   report: string
 }
 
-/** One row of the log tail. */
-export type LogEvent = { ts: number; who: string; text: string; tag: string }
-
 /** A background shell, monitor or agent. */
 export type Task = {
   id: string
@@ -52,7 +49,6 @@ export type Task = {
 export type Mon = {
   owners: Record<string, Owner>
   order: string[]
-  log: LogEvent[]
   tasks: Task[]
   samples: [number, number][]
   working: boolean
