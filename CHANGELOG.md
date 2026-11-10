@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- A blank line separates every section of the pane.
+- **Context** matches the app's own list: the deferred MCP and system tools are rows of their own, and memory files no longer nest under it.
+- **Cost** drops the model rates line and the burn sparkline; the burn rate stays as a figure.
+
 ## 2.2.0 (2026-11-10)
 
 ### Added

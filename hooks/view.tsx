@@ -3,8 +3,8 @@ import type { AgentInfo, Elements, RenderChildren, SessionUsage } from 'claude-c
 
 import type { CtxView, Mon, Owner, Task } from '../types'
 import {
-  C, LANE, SPIN, STALL_MS, bar, fit, fmtCost, fmtDur, fmtRate, fmtTok, hhmmss, hitRate, modelColor,
-  prettyModel, rates, sparkline, sumTok, vlen, zero, addTok,
+  C, LANE, SPIN, STALL_MS, bar, fit, fmtCost, fmtDur, fmtTok, hhmmss, hitRate, modelColor,
+  prettyModel, sumTok, vlen, zero, addTok,
 } from './lib'
 
 type Els = Pick<Elements['terminal'], 'Box' | 'Text'>
@@ -120,17 +120,12 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
   const ctxTok = usage.context.tokens ?? main.ctx
   const buffer = cx?.rows.find(r => r.kind === 'buffer')?.tokens ?? 0
   const burn = burnOf(m, now, k)
-  const buckets = Array<number>(30).fill(0)
-  for (const [ts, v] of m.samples) {
-    const age = Math.trunc((now - ts) / 60_000)
-    if (age >= 0 && age < 30) buckets[29 - age]! += v
-  }
-  const r = rates(main.model)
   const mcol = modelColor(main.model)
   const colorOf = (o: Owner) => (o.id === 'main' ? mcol : LANE[(subs.indexOf(o) + 1) % LANE.length]!)
   const alerts = attention(m, cx, usage, I.agents, now)
 
   // ── Drawing helpers ────────────────────────────────────────────────────────
+  const gap = <Text> </Text>
   const seg = ([text, color, style]: Seg) => (
     <Text color={color} bold={style === 'b'} italic={style === 'i'} strikethrough={style === 's'} dimColor={style === 'd'}>
       {text}
@@ -207,8 +202,6 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
   const kinds = [['in', 'Input', C.orange], ['cw', 'Cache write', C.pink], ['cr', 'Cache read', C.blue], ['out', 'Output', C.gold]] as const
   const saved = nocache > 0 ? Math.max(0, 1 - exact / nocache) * 100 : 0
   const burnCol = burn > 20 ? C.red : burn > 5 ? C.gold : C.light
-  const sw = Math.max(6, Math.min(30, side - 22))
-  const spark = sparkline(buckets.slice(-sw))
   const lbw = Math.max(4, side - 22)
   const limits = usage.rateLimits.map(l => {
     const col = l.percentUsed >= 90 ? C.red : l.percentUsed >= 70 ? C.gold : ACCENT
@@ -219,7 +212,6 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
     )
   })
   const bill = section('Cost', [[fmtCost(exact), ACCENT, 'b']], [
-    line([fit(`${prettyModel(main.model)} · ${fmtRate(r.in)} in · ${fmtRate(r.out)} out /MTok`, side), C.dark]),
     line(...stack(kinds.map(([key, , col]): [number, string] => [usd[key], col]), side, totUsd)),
     ...kinds.map(([key, name, col]) => line(
       ['● ', col], [name.padEnd(13), C.light], [fmtTok(tok[key]).padStart(7), C.gray], [fmtCost(usd[key] * k).padStart(Math.max(9, side - 22)), C.light],
@@ -229,10 +221,7 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
       [['cache hit ', C.gray], [(hitRate(tok) * 100).toFixed(0) + '%', C.light, 'b']],
       [['saved ', C.gray], [saved.toFixed(0) + '%', C.green, 'b'], [' of ', C.dark], [fmtCost(nocache), C.dark, 's']],
     ),
-    spread(
-      [['burn ', C.gray], [fmtCost(burn) + '/h', burnCol, 'b']],
-      [...spark.map((s): Seg => [s.ch, s.on ? ACCENT : C.track]), [' 30m', C.dark]],
-    ),
+    line(['burn ', C.gray], [fmtCost(burn) + '/h', burnCol, 'b']),
     ...limits,
   ], side)
 
@@ -243,14 +232,9 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
   const used = (cx?.rows ?? []).filter(x => x.kind === 'used')
   const free = cx?.rows.find(x => x.kind === 'free')
   const deferred = (cx?.rows ?? []).filter(x => x.kind === 'deferred')
-  const deferredTok = deferred.reduce((s, x) => s + x.tokens, 0)
-  const mcpN = cx?.mcpDeferred ?? 0
   const catCol = (i: number) => LANE[i % LANE.length]!
   const ctxParts: [number, string][] = [...used.map((x, i): [number, string] => [x.tokens, catCol(i)]), [buffer, C.dark]]
   const nw = Math.max(6, side - 17)
-  const memRows = (cx?.memory ?? []).map(f =>
-    line(['  └ ', C.track], [fit(f.name, nw - 2).padEnd(nw - 2), C.dark], [fmtTok(f.tokens).padStart(7), C.dark]),
-  )
   const dotRow = (col: string, name: string, tokens: number, nameCol: string = C.light) => (
     <Text mono wrap="truncate-end">
       {seg(['● ', col])}
@@ -261,11 +245,11 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
   )
   const context = section('Context', [[pct.toFixed(0) + '%', pctCol, 'b'], [` · ${fmtTok(ctxTok)} / ${fmtTok(lim)}`, C.dark]], [
     line(...stack(ctxParts, side, lim)),
-    ...used.flatMap((x, i) => [dotRow(catCol(i), x.name, x.tokens), ...(/memory/i.test(x.name) ? memRows : [])]),
+    ...used.map((x, i) => dotRow(catCol(i), x.name, x.tokens)),
     buffer > 0 && dotRow(C.dark, 'Autocompact buffer', buffer),
     free && dotRow(C.track, 'Free space', free.tokens, C.gray),
     !cx && line(['measuring after the first turn…', C.dark]),
-    (deferredTok > 0 || mcpN > 0) && line(['○ ', C.dark], [`deferred ${fmtTok(deferredTok)}${mcpN ? ` · ${mcpN} MCP tools` : ''} · not in context`, C.dark]),
+    ...deferred.map(x => dotRow(C.track, x.name, x.tokens, C.dark)),
   ], side)
 
   // ── Subagents ──────────────────────────────────────────────────────────────
@@ -376,18 +360,21 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
       )))
 
   return (
-    <Box flexDirection="column" width={W} paddingX={1} rowGap="sm">
-      {header}
-      {attentionBox}
-      <Box flexDirection={side < iw ? 'row' : 'column'} columnGap={3} rowGap="sm">
-        {bill}
-        {context}
-      </Box>
-      {agentsBox}
-      {tasksBox}
-      {nothingDelegated}
-      {timeline}
-      {log}
+    <Box flexDirection="column" width={W} paddingX={1}>
+      {[
+        header,
+        attentionBox,
+        <Box flexDirection={side < iw ? 'row' : 'column'} columnGap={3}>
+          {bill}
+          {side < iw ? null : gap}
+          {context}
+        </Box>,
+        agentsBox,
+        tasksBox,
+        nothingDelegated,
+        timeline,
+        log,
+      ].filter(Boolean).flatMap((block, i) => (i ? [gap, block] : [block]))}
     </Box>
   )
 }
