@@ -173,3 +173,15 @@ test('each subagent gets one flow row in a single column', async ($, on) => {
     await ui.unmount()
   }
 })
+
+test('each subagent section lists the steps of its own workflow', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: '/Users/me/shop', surface: 'terminal', isInteractive: true })
+  await $.agent.spawn({ tool_use_id: 'tu1', prompt: 'p', description: 'worker', subagentType: 'Explore', provider: { plugin: 'engine' }, parentModel: 'claude-opus-5-5', background: false, fork: false } as never)
+  await $.tool.call({ tool: 'Read', file_path: '/Users/me/shop/cart.ts', agentId: 'ag1' } as never)
+  await $.tool.call({ tool: 'Edit', file_path: '/Users/me/shop/pay.ts', old_string: 'a', new_string: 'b\nc', agentId: 'ag1' } as never)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 200 } })
+  expect(await ui.find({ type: 'Text', text: /cart\.ts/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /pay\.ts/ })).toBeDefined()
+  await ui.unmount()
+})

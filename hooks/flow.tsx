@@ -70,5 +70,46 @@ export function drawFlow({ Box, Text }: Els, I: FlowInput) {
     )
   }
 
-  return <Box flexDirection="column" width={I.width} height={I.height} overflow="hidden">{agents.map(row)}</Box>
+  // Timeline line: `mm:ss ● Tag  text            +n -n | 1.2s`, times relative to the agent's start.
+  const stepLine = (o: Owner, st: Owner['steps'][number], live: boolean) => {
+    const running = st.end === 0 && live
+    const [ic, icol] = st.err ? ['✕', C.red] : running ? [spin, ACCENT] : ['●', TAG[st.tag] ?? C.gray]
+    const tag = (st.tag.charAt(0).toUpperCase() + st.tag.slice(1)).slice(0, 7).padEnd(7)
+    const right: Seg[] = st.plus || st.minus
+      ? [['+' + st.plus, C.green], [' -' + st.minus, C.red]]
+      : st.end ? [[(Math.max(0, st.end - st.ts) / 1000).toFixed(1) + 's', C.dark]] : []
+    const head: Seg[] = [['  ' + mmss(st.ts - (o.first || st.ts)) + ' ', C.dark], [ic + ' ', icol], [tag + ' ', TAG[st.tag] ?? C.gray, 'b']]
+    const tw = Math.max(4, I.width - textW(head) - textW(right) - 2)
+    const segs: Seg[] = [...head, [fit(st.text, tw).padEnd(tw), st.err ? C.red : C.light], [' '], ...right]
+    return (
+      <Text mono wrap="truncate-end">
+        {segs.map(([t, c, s]) => <Text color={c} bold={s === 'b'} dimColor={s === 'd'} italic={s === 'i'}>{t}</Text>)}
+      </Text>
+    )
+  }
+
+  // Each agent is a section: its header row, then the latest steps of its own workflow (and the report once finished).
+  const per = Math.floor((I.height - (agents.length - 1)) / Math.max(1, agents.length))
+  const nSteps = per >= 2 ? Math.min(per - 1, 8) : 0
+  const section = (o: Owner) => {
+    const s = states.get(o.id) ?? 'run'
+    const live = s === 'run' || s === 'stall'
+    const report = !live && o.report ? 1 : 0
+    const steps = nSteps - report > 0 ? o.steps.slice(-(nSteps - report)) : []
+    return (
+      <Box flexDirection="column" marginBottom={nSteps > 0 ? 1 : 0}>
+        {row(o)}
+        {steps.map(st => stepLine(o, st, live))}
+        {report && nSteps > 0 ? (
+          <Text mono wrap="truncate-end">
+            <Text color={C.dark}>{'  ' + mmss(o.last - (o.first || o.last)) + ' '}</Text>
+            <Text color={C.green}>{'✓ '}</Text>
+            <Text color={C.light}>{fit(o.report, Math.max(4, I.width - 11))}</Text>
+          </Text>
+        ) : null}
+      </Box>
+    )
+  }
+
+  return <Box flexDirection="column" width={I.width} height={I.height} overflow="hidden">{agents.map(section)}</Box>
 }
