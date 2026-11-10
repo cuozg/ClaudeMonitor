@@ -432,9 +432,9 @@ export function drawBand({ Box, Text, Button }: BandEls, B: BandInput) {
   const running = B.agents.filter(a => a.status === 'running' || a.status === 'pending').length
   const tasks = m.tasks.filter(t => t.state === 'run').length
   const live = m.working || Object.values(m.owners).some(o => o.flights.length > 0)
-  const window = usage.context.window || 1
+  const window = (B.cx?.window ?? usage.context.window) || 1
   const tokens = usage.context.tokens ?? main.ctx
-  const pct = usage.context.percent ?? Math.round((tokens / window) * 100)
+  const pct = Math.round((tokens / window) * 100)
   const cost = usage.cost?.usd ?? Object.values(m.owners).reduce((s, o) => s + sumTok(o.usd), 0)
   const alerts = attention(m, B.cx, usage, B.agents, B.now)
   const hot = alerts.some(a => a[1] === C.red)

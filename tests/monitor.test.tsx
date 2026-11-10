@@ -103,6 +103,17 @@ test('a calm session shows no attention box', async ($, on) => {
   await ui.unmount()
 })
 
+test('the band shows the same context percent as the pane', async ($, on) => {
+  engine(on, { usage: { ...USAGE, context: { ...USAGE.context, percent: 9 } }, agents: false })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await pane.find({ type: 'Text', text: /^5%$/ })).toBeDefined()
+  await pane.unmount()
+  const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await band.find({ type: 'Text', text: / 5%$/ })).toBeDefined()
+  expect(await band.find({ type: 'Text', text: / 9%$/ })).toBeUndefined()
+  await band.unmount()
+})
+
 const RUN = { command: 'monitor', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } } as never
 
 test('/monitor toggles the pane', async ($, on) => {
