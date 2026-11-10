@@ -57,6 +57,7 @@ export type Mon = {
   samples: [number, number][]
   working: boolean
   closed: boolean
+  agentsClosed: boolean
 }
 
 /** The context window broken down as /context does. */

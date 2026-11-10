@@ -1,4 +1,4 @@
-// Agent flow: a single column, one row per subagent.
+// Agent flow: a single column, one section per subagent, a hairline between sections.
 import type { Elements } from 'claude-code'
 
 import type { Owner } from '../types'
@@ -97,7 +97,7 @@ export function drawFlow({ Box, Text }: Els, I: FlowInput) {
     const report = !live && o.report ? 1 : 0
     const steps = nSteps - report > 0 ? o.steps.slice(-(nSteps - report)) : []
     return (
-      <Box flexDirection="column" marginBottom={nSteps > 0 ? 1 : 0}>
+      <Box flexDirection="column">
         {row(o)}
         {steps.map(st => stepLine(o, st, live))}
         {report && nSteps > 0 ? (
@@ -111,5 +111,11 @@ export function drawFlow({ Box, Text }: Els, I: FlowInput) {
     )
   }
 
-  return <Box flexDirection="column" width={I.width} height={I.height} overflow="hidden">{agents.map(section)}</Box>
+  // A hairline separates one subagent session from the next.
+  const rule = <Text mono color={C.track}>{'─'.repeat(Math.max(1, I.width))}</Text>
+  return (
+    <Box flexDirection="column" width={I.width} height={I.height} overflow="hidden">
+      {agents.flatMap((o, i) => (i ? [rule, section(o)] : [section(o)]))}
+    </Box>
+  )
 }

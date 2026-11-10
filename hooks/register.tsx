@@ -5,18 +5,21 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { CtxView, Mon, Owner, Task } from '../types'
 import { addTok, describeTool, firstLine, lineDelta, newOwner, price, summaryLine, taskNotes } from './lib'
-import { drawBand, drawPane } from './view'
+import { drawAgents, drawBand, drawMonitor } from './view'
 
 const PANE = 'session-monitor'
 const TITLE = 'Monitor'
+const AGENTS = 'session-monitor-agents'
+const AGENTS_TITLE = 'Subagents'
+const AGENTS_COLUMNS = 70
 // Asks for the widest dock the terminal allows (45% of its columns).
 const DOCK_COLUMNS = 400
 const MAX_LOG = 300
 const MAX_TS = 400
 const MAX_STEPS = 40
 
-const empty = (): Mon => ({ owners: { main: newOwner('main', 'main') }, order: ['main'], log: [], tasks: [], samples: [], working: false, closed: false })
-const data = atom({ plugin: 'session-monitor', key: 'data' } as const, empty(), { shape: 'mon-2' })
+const empty = (): Mon => ({ owners: { main: newOwner('main', 'main') }, order: ['main'], log: [], tasks: [], samples: [], working: false, closed: false, agentsClosed: false })
+const data = atom({ plugin: 'session-monitor', key: 'data' } as const, empty(), { shape: 'mon-3' })
 const ctx = atom({ plugin: 'session-monitor', key: 'ctx' } as const, null, { shape: 'ctx-1' })
 
 let tick = 0
@@ -71,7 +74,12 @@ async function openPane($: EngineInterface, columns = DOCK_COLUMNS) {
   return $.ui.open({ id: PANE, title: TITLE, columns, ...(onTerminal ? { backgroundColor: 'transparent' } : {}) })
 }
 
-const isShown = async ($: EngineInterface) => (await $.ui.panes()).some(p => p.id === PANE && p.isPlaced)
+async function openAgents($: EngineInterface) {
+  const onTerminal = (await $.session.surfaces()).includes('terminal')
+  return $.ui.open({ id: AGENTS, title: AGENTS_TITLE, columns: AGENTS_COLUMNS, ...(onTerminal ? { backgroundColor: 'transparent' } : {}) })
+}
+
+const isShown = async ($: EngineInterface, id = PANE) => (await $.ui.panes()).some(p => p.id === id && p.isPlaced)
 
 /** Closes the pane when a surface draws it, else opens it; says which. */
 async function toggle($: EngineInterface, columns?: number): Promise<'opened' | 'closed'> {
@@ -85,6 +93,17 @@ async function toggle($: EngineInterface, columns?: number): Promise<'opened' | 
   return 'opened'
 }
 
+/** Same for the subagents pane. */
+async function toggleAgents($: EngineInterface) {
+  if (await isShown($, AGENTS)) {
+    await $.ui.close({ id: AGENTS })
+    await edit($, m => void (m.agentsClosed = true))
+    return
+  }
+  await edit($, m => void (m.agentsClosed = false))
+  await openAgents($)
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'monitor', description: 'Open or close the session monitor pane', immediate: true })
@@ -94,6 +113,7 @@ export const register: Register = on => {
     })
     const m = await read($, data)
     if (!m.closed) void openPane($)
+    if (!m.agentsClosed && m.order.length > 1) void openAgents($)
     void measureContext($).catch(() => undefined)
     return next(e)
   })
@@ -113,6 +133,7 @@ export const register: Register = on => {
 
   on('ui.close', async ($, e, next) => {
     if (e.id === PANE && e.origin.kind === 'person') await edit($, m => void (m.closed = true))
+    if (e.id === AGENTS && e.origin.kind === 'person') await edit($, m => void (m.agentsClosed = true))
     return next(e)
   }).catch(($, e, next) => next(e))
 
@@ -159,6 +180,7 @@ export const register: Register = on => {
     if (r.agentId) {
       const id = r.agentId
       const now = await $.clock.now()
+      const first = (await read($, data)).order.length === 1
       await edit($, m => {
         const o = ownerOf(m, id)
         o.label = e.name || e.description || e.subagentType || o.label
@@ -170,6 +192,7 @@ export const register: Register = on => {
           m.tasks.unshift({ id, kind: 'agent', desc: e.description || e.subagentType, owner: e.parentAgentId ?? 'main', start: now, end: 0, state: 'run', note: '', events: 0 })
         }
       })
+      if (first && !(await read($, data)).agentsClosed && !(await isShown($, AGENTS))) void openAgents($)
     }
     return r
   }).catch(($, e, next) => next(e))
@@ -281,14 +304,22 @@ export const register: Register = on => {
       $.session.id(),
     ])
     const home = (await $.env.get('HOME')) ?? ''
-    return drawPane(els, { m, cx, usage, agents, now, cwd, home, sid, tick, width: e.props.bodyColumns, rows: e.props.scroll.bodyRows })
+    return drawMonitor(els, { m, cx, usage, agents, now, cwd, home, sid, tick, width: e.props.bodyColumns, rows: e.props.scroll.bodyRows })
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     const els = $.ui.resolve(e)
-    const [m, cx, usage, agents, now, shown] = await Promise.all([read($, data), read($, ctx), $.session.usage(), $.agent.list(), $.clock.now(), isShown($)])
+    const [m, cx, usage, agents, now, shown, agentsShown] = await Promise.all([read($, data), read($, ctx), $.session.usage(), $.agent.list(), $.clock.now(), isShown($), isShown($, AGENTS)])
     const columns = e.viewport?.columns
-    return drawBand(els, { m, cx, usage, agents, now, shown, tick, width: e.props.bodyColumns, onToggle: () => void toggle($, columns) })
+    return drawBand(els, { m, cx, usage, agents, now, shown, agentsShown, tick, width: e.props.bodyColumns, onToggle: () => void toggle($, columns), onToggleAgents: () => void toggleAgents($) })
+  })
+
+  on('ui.render', { component: 'Pane', requestId: AGENTS }, async ($, e) => {
+    const els = $.ui.resolve(e)
+    const [m, cx, usage, agents, now, cwd, sid] = await Promise.all([
+      read($, data), read($, ctx), $.session.usage(), $.agent.list(), $.clock.now(), $.session.cwd(), $.session.id(),
+    ])
+    return drawAgents(els, { m, cx, usage, agents, now, cwd, home: '', sid, tick, width: e.props.bodyColumns, rows: e.props.scroll.bodyRows })
   })
 }

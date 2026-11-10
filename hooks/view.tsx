@@ -387,12 +387,14 @@ type BandInput = {
   agents: AgentInfo[]
   now: number
   shown: boolean
+  agentsShown: boolean
   tick: number
   width: number
   onToggle: () => void
+  onToggleAgents: () => void
 }
 
-/** The one-line band above the prompt: the key figures, what needs attention, and the pane's toggle. */
+/** The one-line band above the prompt: the key figures and the toggles of the monitor and subagents panes. */
 export function drawBand({ Box, Text, Button }: BandEls, B: BandInput) {
   const { m, usage } = B
   const main = m.owners.main!
@@ -424,39 +426,26 @@ export function drawBand({ Box, Text, Button }: BandEls, B: BandInput) {
         {seg('bg ', C.gray)}
         {seg(String(tasks), tasks ? C.cyan : C.gray)}
       </Text>
-      <Button key="toggle" label={B.shown ? 'Hide monitor' : 'Show monitor'} onPress={B.onToggle} />
+      <Box flexDirection="row" columnGap={1}>
+        <Button key="agents" label={B.agentsShown ? 'Hide agents' : 'Show agents'} onPress={B.onToggleAgents} />
+        <Button key="toggle" label={B.shown ? 'Hide monitor' : 'Show monitor'} onPress={B.onToggle} />
+      </Box>
     </Box>
   )
 }
 
-/** The pane: with subagents, their agent-flow column (one row per agent) sits left of the monitor sections (stacked above them when narrow). */
-export function drawPane(els: Els, I: Input & { rows: number }) {
+/** The subagents pane: one section per subagent, each with its own step timeline. */
+export function drawAgents(els: Els, I: Input & { rows: number }) {
   const { m } = I
   const subs = m.order.slice(1).map(id => m.owners[id]!).filter(Boolean)
-  if (subs.length === 0) return drawMonitor(els, I)
-  const { Box } = els
+  const { Box, Text } = els
+  if (subs.length === 0) return <Box paddingX={1}><Text color={C.dark}>no subagents spawned yet</Text></Box>
   const states = classify(m, I.agents, I.now)
   const { k } = billOf(m, I.usage)
-  const flowOf = (width: number, height: number) =>
-    drawFlow(els, {
-      agents: pickAgents(subs, states, height), states, now: I.now, tick: I.tick, width, height,
-      colorOf: o => LANE[(subs.indexOf(o) + 1) % LANE.length]!, cost: o => sumTok(o.usd) * k,
-      window: I.cx?.window ?? I.usage.context.window,
-    })
-  const rows = Math.max(12, I.rows)
-  if (I.width >= 110) {
-    const monW = Math.max(56, Math.floor(I.width * 0.42))
-    return (
-      <Box flexDirection="row" columnGap={1} width={I.width}>
-        {flowOf(I.width - monW - 1, rows)}
-        {drawMonitor(els, { ...I, width: monW })}
-      </Box>
-    )
-  }
-  return (
-    <Box flexDirection="column" width={I.width}>
-      {flowOf(I.width, Math.max(10, Math.floor(rows / 2)))}
-      {drawMonitor(els, I)}
-    </Box>
-  )
+  const height = Math.max(10, I.rows)
+  return drawFlow(els, {
+    agents: pickAgents(subs, states, height), states, now: I.now, tick: I.tick, width: I.width, height,
+    colorOf: o => LANE[(subs.indexOf(o) + 1) % LANE.length]!, cost: o => sumTok(o.usd) * k,
+    window: I.cx?.window ?? I.usage.context.window,
+  })
 }
