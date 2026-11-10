@@ -91,7 +91,7 @@ export function attention(m: Mon, cx: CtxView | null, usage: SessionUsage, agent
   return out.sort((a, b) => Number(b[1] === C.red) - Number(a[1] === C.red))
 }
 
-export function drawMonitor({ Box, Text }: Els, I: Input) {
+export function drawMonitor({ Box, Text }: Els, I: Input & { rows?: number }) {
   const { m, cx, usage, now, tick } = I
   const W = Math.max(30, I.width)
   const iw = W - 2 // inside the side padding
@@ -107,7 +107,6 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
   const usd = all.reduce((t, o) => addTok(t, o.usd), zero())
   const nocache = all.reduce((s, o) => s + o.nocache, 0) * k
   const subCost = subs.reduce((s, o) => s + cost(o), 0)
-  const tasksOf = (id: string) => m.tasks.filter(t => t.owner === id)
   const states = classify(m, I.agents, now)
   const running = subs.filter(o => ['run', 'stall'].includes(states.get(o.id)!)).length
   const runTasks = m.tasks.filter(t => t.state === 'run').length
@@ -213,7 +212,7 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
       [(l.percentUsed.toFixed(0) + '%').padStart(5), col, 'b'], [l.resetsAt ? '  ↻ ' + hhmmss(Date.parse(l.resetsAt)).slice(0, 5) : '', C.dark],
     )
   })
-  const bill = section('Cost', [[fmtCost(exact), ACCENT, 'b']], [
+  const billBody = [
     line(...stack(kinds.map(([key, , col]): [number, string] => [usd[key], col]), side, totUsd)),
     ...kinds.map(([key, name, col]) => line(
       ['● ', col], [name.padEnd(13), C.light], [fmtTok(tok[key]).padStart(7), C.gray], [fmtCost(usd[key] * k).padStart(Math.max(9, side - 22)), C.light],
@@ -226,7 +225,8 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
     ),
     line(['burn ', C.gray], [fmtCost(burn) + '/h', burnCol, 'b']),
     ...limits,
-  ], side)
+  ]
+  const bill = section('Cost', [[fmtCost(exact), ACCENT, 'b']], billBody, side)
 
   // ── Context ────────────────────────────────────────────────────────────────
   const lim = window || 1
@@ -246,58 +246,15 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
       {seg([((tokens / lim) * 100).toFixed(1).padStart(6) + '%', C.dark])}
     </Text>
   )
-  const context = section('Context', [[pct.toFixed(0) + '%', pctCol, 'b'], [` · ${fmtTok(ctxTok)} / ${fmtTok(lim)}`, C.dark]], [
+  const contextBody = [
     line(...stack(ctxParts, sideR, lim)),
     ...used.map((x, i) => dotRow(catCol(i), x.name, x.tokens)),
     buffer > 0 && dotRow(C.dark, 'Autocompact buffer', buffer),
     free && dotRow(C.track, 'Free space', free.tokens, C.gray),
     !cx && line(['measuring after the first turn…', C.dark]),
     ...deferred.map(x => dotRow(C.track, x.name, x.tokens, C.dark)),
-  ], sideR)
-
-  // ── Subagents ──────────────────────────────────────────────────────────────
-  const counts: Record<string, number> = {}
-  for (const s of states.values()) counts[s] = (counts[s] ?? 0) + 1
-  const agentRight = ([['run', 'running', ACCENT], ['stall', 'idle?', C.gold], ['wait', 'waiting', C.blue], ['fail', 'failed', C.red], ['done', 'done', C.gray]] as const)
-    .filter(([key]) => counts[key])
-    .map(([key, name, col], i): Seg => [`${i ? ' · ' : ''}${counts[key]} ${name}`, col])
-  const DOT: Record<string, [string, string]> = {
-    run: [spin, ACCENT], stall: ['◌', C.gold], wait: ['◷', C.blue], done: ['●', C.dark], fail: ['✕', C.red], stop: ['■', C.orange],
-  }
-  const compact = iw < 80
-  const nameW = Math.max(10, Math.min(26, Math.floor(iw / 4)))
-  const timeW = compact ? 0 : 9
-  const costW = 8
-  const nowW = Math.max(8, iw - 2 - nameW - 1 - timeW - costW)
-  const SHOW = 12
-  const agentRows = subs.slice(0, SHOW).flatMap(o => {
-    const s = states.get(o.id)!
-    const fl = o.flights.at(-1)
-    const nowSeg: Seg =
-      (s === 'run' || s === 'stall') && fl ? [fit(fl.desc, nowW - 7) + ' ' + fmtDur(now - fl.ts), C.gray]
-      : s === 'stall' ? [`no activity ${fmtDur(now - o.last)} · last: ${o.action}`, C.gold]
-      : s === 'run' ? [o.action || 'starting', C.gray]
-      : s === 'wait' ? [`waiting on ${tasksOf(o.id).filter(t => t.state === 'run').length} bg task(s)`, C.blue]
-      : [o.report || o.say || o.action || '—', s === 'done' ? C.dark : C.red]
-    const row = line(
-      [DOT[s]![0] + ' ', DOT[s]![1]],
-      [fit(o.label, nameW).padEnd(nameW) + ' ', colorOf(o), s === 'run' ? 'b' : undefined],
-      [fit(nowSeg[0], nowW).padEnd(nowW), nowSeg[1]],
-      !compact && [(o.first ? fmtDur((s === 'run' || s === 'stall' ? now : o.last) - o.first) : '—').padStart(timeW), C.dark],
-      [fmtCost(cost(o)).padStart(costW), C.light],
-    )
-    if (s === 'done') return [row]
-    const own = tasksOf(o.id)
-    const bits = [o.type.replace('general-purpose', 'general') || 'agent', prettyModel(o.model), ...(o.effort ? [o.effort] : []), ...(o.background ? ['bg'] : []), `${o.nTools} steps`, ...(o.errs.length ? [`${o.errs.length} errors`] : []), ...(own.length ? [`${own.length} bg task${own.length > 1 ? 's' : ''}`] : [])]
-    const meta = bits.join(' · ')
-    const say = o.say && o.sayTs >= (fl?.ts ?? 0) - 600_000 ? o.say : ''
-    return [row, line(['  └ ', C.track], [fit(meta, Math.max(10, Math.floor((iw * 2) / 5))), C.dark], !!say && [' │ ', C.track], !!say && [fit('“' + say + '”', iw - 8 - vlen(meta)), C.gray, 'i'])]
-  })
-  const rest = subs.slice(SHOW)
-  const agentsBox = subs.length > 0 && section('Subagents', agentRight.length ? agentRight : [[String(subs.length), C.gray]], [
-    ...agentRows,
-    rest.length > 0 && line([`  +${rest.length} more · ${fmtTok(rest.reduce((s, o) => s + sumTok(o.tok), 0))} · ${fmtCost(rest.reduce((s, o) => s + cost(o), 0))}`, C.dark]),
-  ])
+  ]
+  const context = section('Context', [[pct.toFixed(0) + '%', pctCol, 'b'], [` · ${fmtTok(ctxTok)} / ${fmtTok(lim)}`, C.dark]], contextBody, sideR)
 
   // ── Background tasks ───────────────────────────────────────────────────────
   const ownerName = (id: string) => (id === 'main' ? 'main' : m.owners[id]?.label ?? id.slice(0, 6))
@@ -308,9 +265,22 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
   const result = (t: Task): Seg =>
     t.state === 'run' ? (t.kind === 'monitor' ? [`${t.events} events`, C.cyan] : ['running', ACCENT])
     : t.state === 'fail' ? ['failed', C.red] : t.state === 'stop' ? ['stopped', C.gold] : ['done', C.dark]
-  const shownTasks = m.tasks.slice(0, 8)
   const fails = m.tasks.filter(t => t.state === 'fail').length
-  const tasksBox = m.tasks.length > 0 && section('Background tasks', [
+  const taskLines = (t: Task) => 1 + Number(t.state === 'run' && !!t.note)
+  /** The pane never scrolls: tasks and activity shrink to the rows left under the fixed blocks. */
+  const rowsOf = (body: unknown[]) => body.filter(Boolean).length
+  // header, then each block under a one-row gap; the cost and context blocks sit side by side when wide
+  const topRows = 1 + (side < iw ? Math.max(rowsOf(billBody), rowsOf(contextBody)) : rowsOf(billBody) + 1 + rowsOf(contextBody) + 1)
+  const fixedRows = 2 + (doing ? 1 : 0) + (attentionBox ? 1 + alerts.length + 1 : 0) + 1 + topRows
+  let taskN = Math.min(8, m.tasks.length)
+  let logN = Math.min(10, m.log.length)
+  if (I.rows && I.rows > 0) {
+    const spare = (n: number) => I.rows! - fixedRows - (n > 0 ? 2 + m.tasks.slice(0, n).reduce((s, t) => s + taskLines(t), 0) + Number(m.tasks.length > n) : 0) - 2
+    while (taskN > 0 && spare(taskN) < Math.min(3, logN)) taskN--
+    logN = Math.max(0, Math.min(logN, spare(taskN)))
+  }
+  const shownTasks = m.tasks.slice(0, taskN)
+  const tasksBox = taskN > 0 && section('Background tasks', [
     [`${runTasks} running`, runTasks ? ACCENT : C.gray], [` · ${m.tasks.length - runTasks} finished`, C.gray], [fails ? ` · ${fails} failed` : '', C.red],
   ], [
     ...shownTasks.flatMap(t => [
@@ -323,38 +293,12 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
     m.tasks.length > shownTasks.length && line([`  +${m.tasks.length - shownTasks.length} older`, C.dark]),
   ])
 
-  const nothingDelegated = subs.length === 0 && m.tasks.length === 0 &&
-    line(['no subagents spawned yet · no background tasks', C.dark])
-
-  // ── Timeline: only worth a section once there is more than one lane ───────
-  const span = Math.max(1000, t1 - t0)
-  const labelW = Math.max(11, Math.min(18, Math.floor(W / 8)))
-  const tw = Math.max(10, iw - labelW)
-  const col = (ts: number) => Math.trunc(((ts - t0) / span) * (tw - 1))
-  const lanes = all.slice(0, 6).map(o => {
-    const cells: [string, string][] = Array.from({ length: tw }, () => [' ', C.track])
-    if (o.first) for (let x = Math.max(0, col(o.first)); x <= Math.min(tw - 1, col(o.last || o.first)); x++) cells[x] = ['·', C.track]
-    for (const ts of o.act) if (ts >= t0) cells[Math.min(tw - 1, col(ts))] = ['━', colorOf(o)]
-    for (const ts of o.errs) if (ts >= t0) cells[Math.min(tw - 1, col(ts))] = ['✕', C.red]
-    const segs: Seg[] = [[fit(o.label, labelW - 1).padEnd(labelW), colorOf(o)]]
-    for (const [ch, c] of cells) {
-      const last = segs.at(-1)!
-      if (segs.length > 1 && last[1] === c) last[0] += ch
-      else segs.push([ch, c])
-    }
-    return line(...segs)
-  })
-  const timeline = subs.length > 0 && section('Timeline', [[fmtDur(span), C.gray]], [
-    ...lanes,
-    spread([[' '.repeat(labelW) + hhmmss(t0), C.dark]], [[active ? 'now' : hhmmss(t1), C.dark]], labelW + tw),
-  ])
-
   // ── Activity ───────────────────────────────────────────────────────────────
   const whoW = Math.max(9, Math.min(16, Math.floor(iw / 7)))
   const whoCol = (who: string) => (who === 'you' ? C.green : who === 'main' ? mcol : subs.find(o => o.label === who) ? colorOf(subs.find(o => o.label === who)!) : C.gray)
-  const log = section('Activity', [[`last ${Math.min(10, m.log.length)}`, C.dark]], m.log.length === 0
+  const log = (logN > 0 || m.log.length === 0) && section('Activity', [[`last ${logN}`, C.dark]], m.log.length === 0
     ? [line(['nothing yet', C.dark])]
-    : m.log.slice(-10).map(ev => line(
+    : m.log.slice(-logN).map(ev => line(
         [hhmmss(ev.ts) + '  ', C.dark], [fit(ev.who, whoW).padEnd(whoW) + ' ', whoCol(ev.who)],
         [fit(ev.text, iw - whoW - 11), ev.tag === 'fail' ? C.red : ev.tag === 'say' || ev.tag === 'prompt' ? undefined : C.gray, ev.tag === 'say' ? 'i' : undefined],
       )))
@@ -369,10 +313,7 @@ export function drawMonitor({ Box, Text }: Els, I: Input) {
           {side < iw ? null : gap}
           {context}
         </Box>,
-        agentsBox,
         tasksBox,
-        nothingDelegated,
-        timeline,
         log,
       ].filter(Boolean).flatMap((block, i) => (i ? [gap, block] : [block]))}
     </Box>

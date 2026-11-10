@@ -62,7 +62,6 @@ test('the pane shows the bill, context, agents and log on every surface', async 
     expect(await ui.find({ type: 'Text', text: /^shop$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^\$1\.50$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /read cart\.ts/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /review code/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /Looking at the cart code/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /5h limit/ })).toBeDefined()
     await ui.unmount()
@@ -72,7 +71,6 @@ test('the pane shows the bill, context, agents and log on every surface', async 
 test('an empty session draws without data', async ($, on) => {
   engine(on, { usage: { ...USAGE, cost: undefined, rateLimits: [] }, agents: false })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 40 } })
-  expect(await ui.find({ type: 'Text', text: /no subagents spawned yet/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Idle/ })).toBeDefined()
   await ui.unmount()
 })
