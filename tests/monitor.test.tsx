@@ -70,7 +70,25 @@ test('an empty session draws without data', async ($, on) => {
   engine(on, { usage: { ...USAGE, cost: undefined, rateLimits: [] }, agents: false })
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 40 } })
   expect(await ui.find({ type: 'Text', text: /Idle/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /No agents yet/ })).toBeDefined()
   await ui.unmount()
+})
+
+test('with no subagents, hiding the monitor keeps the pane open on the empty agents half', async ($, on) => {
+  engine(on, { panes: false })
+  let open = false
+  on('ui.open', () => ((open = true), { value: { isPlaced: true } }))
+  on('ui.close', () => ((open = false), { value: undefined }))
+  on('ui.panes', () => ({ value: open ? [{ id: 'session-monitor', title: 'Monitor', isShown: true, isFocused: false, isPlaced: true }] : [] }))
+  await $.session.start({ cwd: '/Users/me/shop', surface: 'terminal', isInteractive: true })
+  const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  await band.press({ key: 'toggle' })
+  expect(open).toBe(true)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 250 } })
+  expect(await ui.find({ type: 'Text', text: /No agents yet/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^shop$/ })).toBeUndefined()
+  await ui.unmount()
+  await band.unmount()
 })
 
 test('the header pill follows the main state, not recent activity', async ($, on) => {
@@ -152,9 +170,14 @@ test('the band above the prompt shows figures and toggles the pane', async ($, o
     expect(await ui.find({ type: 'Text', text: /\$1\.50/ })).toBeDefined()
     expect((await ui.find({ key: 'toggle' }))?.text).toMatch(/Hide monitor/)
     await ui.press({ key: 'toggle' })
+    expect(open).toBe(true)
+    expect((await ui.find({ key: 'toggle' }))?.text).toMatch(/Show monitor/)
+    await ui.press({ key: 'agents' })
     expect(open).toBe(false)
+    await ui.press({ key: 'agents' })
     await ui.press({ key: 'toggle' })
     expect(open).toBe(true)
+    expect((await ui.find({ key: 'toggle' }))?.text).toMatch(/Hide monitor/)
     await ui.unmount()
   }
 })
@@ -209,7 +232,7 @@ test('a hairline separates two subagent sessions, and the band toggles the agent
   await band.unmount()
 })
 
-test('the monitor and the subagents share the pane in equal halves', async ($, on) => {
+test('the monitor keeps a fixed 100 columns beside the subagents, and stacks above them when narrow', async ($, on) => {
   engine(on)
   await $.session.start({ cwd: '/Users/me/shop', surface: 'terminal', isInteractive: true })
   await $.agent.spawn({ tool_use_id: 'tu1', prompt: 'p', description: 'worker', subagentType: 'Explore', provider: { plugin: 'engine' }, parentModel: 'claude-opus-5-5', background: false, fork: false } as never)
@@ -219,14 +242,16 @@ test('the monitor and the subagents share the pane in equal halves', async ($, o
     await ui.unmount()
     return tree
   }
-  const wide = await widths(120)
+  const wide = await widths(131)
   expect(wide).toContain('"flexDirection":"row-reverse"')
-  expect(wide).toContain('"width":60,"height":60')
+  expect(wide).toContain('"width":100,"height":60')
+  expect(wide).toContain('"width":30,"height":60')
   expect(wide).toContain('"width":1,"height":60')
   expect(wide).toContain('│')
   const wider = await widths(250)
   expect(wider).toContain('"width":100,"height":60')
   expect(wider).toContain('"width":149,"height":60')
+  expect(await widths(130)).toContain('"flexDirection":"column"')
   const narrow = await widths(80)
   expect(narrow).toContain('"width":80,"height":30')
   expect(narrow).toContain('─'.repeat(80))
@@ -238,7 +263,7 @@ test('the wheel over the subagents scrolls them alone; over the monitor it moves
   for (let i = 1; i <= 30; i++) {
     await $.agent.spawn({ tool_use_id: 'tu' + i, prompt: 'p', description: 'task ' + i, subagentType: 'Explore', provider: { plugin: 'engine' }, parentModel: 'claude-opus-5-5', background: false, fork: false } as never)
   }
-  const props = { ...PANE.props, bodyColumns: 120, scroll: { offset: 0, bodyRows: 20 } }
+  const props = { ...PANE.props, bodyColumns: 250, scroll: { offset: 0, bodyRows: 20 } }
   const draw = async () => {
     const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props })
     const top = !!(await ui.find({ type: 'Text', text: /task 1\b/ }))
@@ -249,7 +274,7 @@ test('the wheel over the subagents scrolls them alone; over the monitor it moves
   expect(await draw()).toEqual({ top: true, shop: true })
   const wheel = (column: number, by: number) =>
     $.ui.scroll({ component: 'Pane', requestId: 'session-monitor', offset: 0, by, bodyRows: 20, contentRows: 20, origin: { kind: 'person' }, pointer: { column, row: 3 } } as never)
-  await wheel(90, 5)
+  await wheel(200, 5)
   expect(await draw()).toEqual({ top: true, shop: true })
   await wheel(10, 5)
   expect(await draw()).toEqual({ top: false, shop: true })
@@ -283,7 +308,7 @@ test('the band hides the monitor half alone, leaving the subagents in the pane',
   await $.session.start({ cwd: '/Users/me/shop', surface: 'terminal', isInteractive: true })
   await $.agent.spawn({ tool_use_id: 'tu1', prompt: 'p', description: 'job 1', subagentType: 'Explore', provider: { plugin: 'engine' }, parentModel: 'claude-opus-5-5', background: false, fork: false } as never)
   const pane = async () => {
-    const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 120 } })
+    const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 250 } })
     const r = { job: !!(await ui.find({ type: 'Text', text: /job 1/ })), shop: !!(await ui.find({ type: 'Text', text: /^shop$/ })) }
     await ui.unmount()
     return r

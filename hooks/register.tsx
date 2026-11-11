@@ -103,7 +103,7 @@ async function toggleHalf($: EngineInterface, half: 'monitorClosed' | 'agentsClo
   const shown = await isShown($)
   const m = await read($, data)
   if (shown && !m[half]) {
-    const other = half === 'monitorClosed' ? !m.agentsClosed && m.order.length > 1 : !m.monitorClosed
+    const other = half === 'monitorClosed' ? !m.agentsClosed : !m.monitorClosed
     await edit($, n => void (n[half] = true))
     if (!other) await closePane($)
   } else {

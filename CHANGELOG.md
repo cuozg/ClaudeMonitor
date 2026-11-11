@@ -4,7 +4,7 @@
 
 ### Added
 
-- **Agent flow**: subagents share the monitor pane in two equal halves: subagents on the left and the monitor on the right when the pane is 100+ columns wide, else the monitor on top and the subagents below. The halves scroll apart: the wheel over the subagents (or the scroll keys) scrolls them, while the monitor fits its half. Each subagent is its own section: a header row (state, label, model, type, context size and %, cost, elapsed time) and the timeline of its latest 8 steps (time, tool, target, lines changed or duration, errors), plus its report once finished. A hairline separates one subagent from the next. The half shows with the first subagent.
+- **Agent flow**: subagents share the monitor pane: subagents on the left and the monitor on the right at a fixed 100 columns when the pane is 131+ columns wide, else the monitor on top and the subagents below. The halves scroll apart: the wheel over the subagents (or the scroll keys) scrolls them, while the monitor fits its half. Each subagent is its own section: a header row (state, label, model, type, context size and %, cost, elapsed time) and the timeline of its latest 8 steps (time, tool, target, lines changed or duration, errors), plus its report once finished. A hairline separates one subagent from the next. The half always shows, with **No agents yet** before the first subagent.
 - A **Hide agents / Show agents** button in the band above the prompt toggles the subagents half (and opens the pane when it is closed).
 - **Hide monitor** in the band hides only the monitor half: the pane stays open with the subagents alone. The pane closes once neither half has anything to show. `/monitor` still opens or closes the whole pane.
 
@@ -17,6 +17,7 @@
 - The **Activity** log is gone from the monitor; background tasks take the rows it used.
 - A line separates the monitor and the subagents halves: a horizontal line when they are stacked, a vertical one when they sit side by side.
 - The monitor is one column at most 100 wide: the cost block sits above the context block, and a wider pane gives the extra columns to the subagents only.
+- **Hide monitor** keeps the pane open on the agents half even before the first subagent.
 - The band above the prompt no longer shows alerts; they stay in the pane's **Needs attention** box.
 - Every row of the pane ends flush at the section's right edge: the two top columns fill the full width, and the rate-limit, context and subagent rows no longer fall a cell short or long.
 - A blank line separates every section of the pane.

@@ -441,23 +441,23 @@ export function drawBand({ Box, Text, Button }: BandEls, B: BandInput) {
 /** Where the subagents column sits in the pane body: its first column and row, and its size. */
 export type AgentsBox = { column: number; row: number; width: number; height: number }
 
-/** Wide enough for the monitor and the subagents side by side (else the monitor sits on top). */
-const SPLIT_COLUMNS = 100
+/** Wide enough for the monitor and at least 30 columns of subagents side by side (else the monitor sits on top). */
+const SPLIT_COLUMNS = MONITOR_MAX + 1 + 30
 
 /**
- * The monitor pane: the monitor alone, the subagents alone, or both: subagents left and monitor right when wide
- * (equal halves until the monitor reaches MONITOR_MAX, then only the subagents grow), monitor on top when narrow,
- * with a line between them. The monitor fits its part; the subagents scroll from `offset`.
+ * The monitor pane: the monitor alone, the subagents alone, or both: subagents left and the monitor right at a fixed
+ * MONITOR_MAX columns when wide, monitor on top when narrow, with a line between them. The subagents half shows even
+ * before the first subagent. The monitor fits its part; the subagents scroll from `offset`.
  */
 export function drawPane(els: Els, I: Input & { rows: number; offset: number; showMonitor: boolean; showAgents: boolean; onToggleAgent: (id: string) => void }): { el: RenderChildren; agents?: AgentsBox; max: number } {
   const { m } = I
   const subs = m.order.slice(1).map(id => m.owners[id]!).filter(Boolean)
-  if (!I.showAgents || subs.length === 0) return { el: drawMonitor(els, I), max: 0 }
+  if (!I.showAgents) return { el: drawMonitor(els, I), max: 0 }
   const { Box, Text } = els
   const W = Math.max(30, I.width)
   const wide = W >= SPLIT_COLUMNS
   const half = Math.floor(I.rows / 2)
-  const monW = wide ? Math.min(MONITOR_MAX, W - Math.floor(W / 2) - 1) : W
+  const monW = wide ? MONITOR_MAX : W
   const box: AgentsBox = !I.showMonitor ? { column: 0, row: 0, width: W, height: I.rows }
     : wide ? { column: 0, row: 0, width: W - monW - 1, height: I.rows }
     : { column: 0, row: half + 1, width: W, height: Math.max(1, I.rows - half - 1) }
@@ -479,7 +479,7 @@ export function drawPane(els: Els, I: Input & { rows: number; offset: number; sh
         {I.showMonitor && (wide
           ? <Box flexDirection="column" width={1} height={I.rows}>{Array.from({ length: I.rows }, () => <Text mono color={C.track}>│</Text>)}</Box>
           : <Text mono color={C.track}>{'─'.repeat(W)}</Text>)}
-        <Box width={box.width} height={box.height} paddingX={1}>{flow.el}</Box>
+        <Box width={box.width} height={box.height} paddingX={1}>{subs.length ? flow.el : <Text mono color={C.dark}>No agents yet</Text>}</Box>
       </Box>
     ),
   }
