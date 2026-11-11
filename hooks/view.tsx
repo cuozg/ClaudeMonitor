@@ -93,9 +93,12 @@ export function attention(m: Mon, cx: CtxView | null, usage: SessionUsage, agent
   return out.sort((a, b) => Number(b[1] === C.red) - Number(a[1] === C.red))
 }
 
+/** The monitor never grows wider than this; a wider pane gives the extra columns to the subagents. */
+const MONITOR_MAX = 100
+
 export function drawMonitor({ Box, Text }: Els, I: Input & { rows?: number }) {
   const { m, cx, usage, now, tick } = I
-  const W = Math.max(30, I.width)
+  const W = Math.max(30, Math.min(MONITOR_MAX, I.width))
   const iw = W - 2 // inside the side padding
   const spin = SPIN[tick % SPIN.length]!
 
@@ -200,8 +203,8 @@ export function drawMonitor({ Box, Text }: Els, I: Input & { rows?: number }) {
   )
 
   // ── Cost ───────────────────────────────────────────────────────────────────
-  const side = iw >= 76 ? Math.floor((iw - 3) / 2) : iw
-  const sideR = side < iw ? iw - 3 - side : iw // the right column takes the odd cell, so both columns end flush with the pane
+  const side = iw // one column: the cost block sits above the context block
+  const sideR = iw
   const totUsd = sumTok(usd) || 1
   const kinds = [['in', 'Input', C.orange], ['cw', 'Cache write', C.pink], ['cr', 'Cache read', C.blue], ['out', 'Output', C.gold]] as const
   const saved = nocache > 0 ? Math.max(0, 1 - exact / nocache) * 100 : 0
@@ -331,8 +334,8 @@ export function drawMonitor({ Box, Text }: Els, I: Input & { rows?: number }) {
   const taskLines = (t: Task) => 1 + Number(t.state === 'run' && !!t.note)
   /** The pane never scrolls: tasks shrink to the rows left under the fixed blocks. */
   const rowsOf = (body: unknown[]) => body.filter(Boolean).length
-  // header, then each block under a one-row gap; the cost and context blocks sit side by side when wide
-  const topRows = 1 + (side < iw ? Math.max(rowsOf(billBody), rowsOf(contextBody)) : rowsOf(billBody) + 1 + rowsOf(contextBody) + 1)
+  // header, then each block under a one-row gap; the context block sits under the cost block
+  const topRows = 1 + rowsOf(billBody) + 1 + rowsOf(contextBody) + 1
   const fixedRows = 3 + useRows + (doing ? 1 : 0) + (attentionBox ? 1 + alerts.length + 1 : 0) + 1 + topRows + 1 + 1 + rowsOf(tokenBody) + (modelBox ? 1 + 1 + rowsOf(modelBody) : 0)
   const secRows = (list: Task[], n: number) => (n > 0 ? 2 + list.slice(0, n).reduce((s, t) => s + taskLines(t), 0) + Number(list.length > n) : 0)
   let monN = Math.min(4, monTasks.length)
@@ -365,9 +368,9 @@ export function drawMonitor({ Box, Text }: Els, I: Input & { rows?: number }) {
       {[
         header,
         attentionBox,
-        <Box flexDirection={side < iw ? 'row' : 'column'} columnGap={3} width={iw}>
+        <Box flexDirection="column" width={iw}>
           {bill}
-          {side < iw ? null : gap}
+          {gap}
           {context}
         </Box>,
         tokenBox,
@@ -442,8 +445,9 @@ export type AgentsBox = { column: number; row: number; width: number; height: nu
 const SPLIT_COLUMNS = 100
 
 /**
- * The monitor pane: the monitor alone, the subagents alone, or both in two equal halves: subagents left
- * and monitor right when wide, monitor on top when narrow, with a line between them. The monitor fits its half; the subagents scroll from `offset`.
+ * The monitor pane: the monitor alone, the subagents alone, or both: subagents left and monitor right when wide
+ * (equal halves until the monitor reaches MONITOR_MAX, then only the subagents grow), monitor on top when narrow,
+ * with a line between them. The monitor fits its part; the subagents scroll from `offset`.
  */
 export function drawPane(els: Els, I: Input & { rows: number; offset: number; showMonitor: boolean; showAgents: boolean; onToggleAgent: (id: string) => void }): { el: RenderChildren; agents?: AgentsBox; max: number } {
   const { m } = I
@@ -452,11 +456,11 @@ export function drawPane(els: Els, I: Input & { rows: number; offset: number; sh
   const { Box, Text } = els
   const W = Math.max(30, I.width)
   const wide = W >= SPLIT_COLUMNS
-  const half = wide ? Math.floor(W / 2) : Math.floor(I.rows / 2)
+  const half = Math.floor(I.rows / 2)
+  const monW = wide ? Math.min(MONITOR_MAX, W - Math.floor(W / 2) - 1) : W
   const box: AgentsBox = !I.showMonitor ? { column: 0, row: 0, width: W, height: I.rows }
-    : wide ? { column: 0, row: 0, width: half, height: I.rows }
+    : wide ? { column: 0, row: 0, width: W - monW - 1, height: I.rows }
     : { column: 0, row: half + 1, width: W, height: Math.max(1, I.rows - half - 1) }
-  const monW = wide ? W - half - 1 : W
   const monRows = wide ? I.rows : half
   const states = classify(m, I.agents, I.now)
   const { k } = billOf(m, I.usage)
