@@ -441,12 +441,15 @@ export function drawBand({ Box, Text, Button }: BandEls, B: BandInput) {
 /** Where the subagents column sits in the pane body: its first column and row, and its size. */
 export type AgentsBox = { column: number; row: number; width: number; height: number }
 
+/** Beside the subagents the monitor keeps this fixed width; the subagents take the rest of the pane. */
+const MONITOR_SIDE = 50
+
 /** Wide enough for the monitor and at least 30 columns of subagents side by side (else the monitor sits on top). */
-const SPLIT_COLUMNS = MONITOR_MAX + 1 + 30
+const SPLIT_COLUMNS = MONITOR_SIDE + 1 + 30
 
 /**
  * The monitor pane: the monitor alone, the subagents alone, or both: subagents left and the monitor right at a fixed
- * MONITOR_MAX columns when wide, monitor on top when narrow, with a line between them. The subagents half shows even
+ * MONITOR_SIDE columns when wide, monitor on top when narrow, with a line between them. The subagents half shows even
  * before the first subagent. The monitor fits its part; the subagents scroll from `offset`.
  */
 export function drawPane(els: Els, I: Input & { rows: number; offset: number; showMonitor: boolean; showAgents: boolean; onToggleAgent: (id: string) => void }): { el: RenderChildren; agents?: AgentsBox; max: number } {
@@ -457,7 +460,7 @@ export function drawPane(els: Els, I: Input & { rows: number; offset: number; sh
   const W = Math.max(30, I.width)
   const wide = W >= SPLIT_COLUMNS
   const half = Math.floor(I.rows / 2)
-  const monW = wide ? MONITOR_MAX : W
+  const monW = wide ? MONITOR_SIDE : W
   const box: AgentsBox = !I.showMonitor ? { column: 0, row: 0, width: W, height: I.rows }
     : wide ? { column: 0, row: 0, width: W - monW - 1, height: I.rows }
     : { column: 0, row: half + 1, width: W, height: Math.max(1, I.rows - half - 1) }

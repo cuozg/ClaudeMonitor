@@ -232,7 +232,7 @@ test('a hairline separates two subagent sessions, and the band toggles the agent
   await band.unmount()
 })
 
-test('the monitor keeps a fixed 100 columns beside the subagents, and stacks above them when narrow', async ($, on) => {
+test('the monitor keeps a fixed 50 columns beside the subagents, and stacks above them when narrow', async ($, on) => {
   engine(on)
   await $.session.start({ cwd: '/Users/me/shop', surface: 'terminal', isInteractive: true })
   await $.agent.spawn({ tool_use_id: 'tu1', prompt: 'p', description: 'worker', subagentType: 'Explore', provider: { plugin: 'engine' }, parentModel: 'claude-opus-5-5', background: false, fork: false } as never)
@@ -242,19 +242,19 @@ test('the monitor keeps a fixed 100 columns beside the subagents, and stacks abo
     await ui.unmount()
     return tree
   }
-  const wide = await widths(131)
+  const wide = await widths(81)
   expect(wide).toContain('"flexDirection":"row-reverse"')
-  expect(wide).toContain('"width":100,"height":60')
+  expect(wide).toContain('"width":50,"height":60')
   expect(wide).toContain('"width":30,"height":60')
   expect(wide).toContain('"width":1,"height":60')
   expect(wide).toContain('│')
   const wider = await widths(250)
-  expect(wider).toContain('"width":100,"height":60')
-  expect(wider).toContain('"width":149,"height":60')
-  expect(await widths(130)).toContain('"flexDirection":"column"')
-  const narrow = await widths(80)
-  expect(narrow).toContain('"width":80,"height":30')
-  expect(narrow).toContain('─'.repeat(80))
+  expect(wider).toContain('"width":50,"height":60')
+  expect(wider).toContain('"width":199,"height":60')
+  expect(await widths(80)).toContain('"flexDirection":"column"')
+  const narrow = await widths(70)
+  expect(narrow).toContain('"width":70,"height":30')
+  expect(narrow).toContain('─'.repeat(70))
 })
 
 test('the wheel over the subagents scrolls them alone; over the monitor it moves nothing', async ($, on) => {
