@@ -61,10 +61,10 @@ export type Mon = {
   expanded?: string[]
   /** The main loop's last cache miss: when, and how many tokens it wrote again. */
   recache?: { ts: number; tok: number; n: number }
-  /** Tokens and raw dollars of the requests that read each skill, plugin or MCP server's result, main and subagents together. */
-  uses?: Record<'skill' | 'plugin' | 'mcp', Record<string, { tok: number; usd: number }>>
-  /** Per owner: skills, plugins and MCP servers called since its last request; that request is charged to them. */
-  pend?: Record<string, Record<'skill' | 'plugin' | 'mcp', string[]>>
+  /** Tokens and raw dollars of the requests that read each skill, plugin, MCP server or tool's result, main and subagents together. */
+  uses?: Record<'skill' | 'plugin' | 'mcp' | 'tool', Record<string, { tok: number; usd: number }>>
+  /** Per owner: skills, plugins, MCP servers and tools called since its last request; that request is charged to them. */
+  pend?: Record<string, Record<'skill' | 'plugin' | 'mcp' | 'tool', string[]>>
 }
 
 /** The context window broken down as /context does. */

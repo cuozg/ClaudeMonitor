@@ -346,7 +346,7 @@ test('a Monitor section lists the monitor, and a turn end without it in flight g
   expect(await draw()).toEqual({ section: true, tick: true })
 })
 
-test('the pane names the API provider and the skills, plugins and MCP servers that were used', async ($, on) => {
+test('the pane names the API provider and the skills, plugins, MCP servers and tools that were used', async ($, on) => {
   engine(on)
   await $.session.start({ cwd: '/Users/me/shop', surface: 'terminal', isInteractive: true })
   await $.tool.call({ tool: 'Skill', skill: 'unity:unity-cli' } as never)
@@ -356,5 +356,5 @@ test('the pane names the API provider and the skills, plugins and MCP servers th
   const text = JSON.stringify(await ui.drawn())
   await ui.unmount()
   expect(text).toContain('Anthropic API')
-  for (const name of ['Skills', 'Plugins', 'MCP', '/unity:unity-', 'analytics-mcp']) expect(text).toContain(name)
+  for (const name of ['Skills', 'Plugins', 'MCP', 'Tools', 'Skill ', '/unity:unity-', 'analytics-mcp']) expect(text).toContain(name)
 })

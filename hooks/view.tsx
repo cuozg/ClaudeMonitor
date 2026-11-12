@@ -269,8 +269,8 @@ export function drawMonitor({ Box, Text }: Els, I: Input & { rows?: number }) {
   ]
   const context = section('Context', [[pct.toFixed(0) + '%', pctCol, 'b'], [` · ${fmtTok(ctxTok)} / ${fmtTok(lim)}`, C.dark]], contextBody, sideR)
 
-  // ── Skills, plugins and MCP: tokens and cost of the requests that followed each one's use (main and subagents) ──
-  const useBox = (title: string, kind: 'skill' | 'plugin' | 'mcp', prefix = '') => {
+  // ── Skills, plugins, MCP and tools: tokens and cost of the requests that followed each one's use (main and subagents) ──
+  const useBox = (title: string, kind: 'skill' | 'plugin' | 'mcp' | 'tool', prefix = '') => {
     const list = Object.entries(m.uses?.[kind] ?? {}).sort((a, b) => b[1].usd - a[1].usd)
     if (list.length === 0) return null
     const nameW = Math.max(8, iw - 2 - 7 - 9 - 2)
@@ -281,7 +281,7 @@ export function drawMonitor({ Box, Text }: Els, I: Input & { rows?: number }) {
     const total = list.reduce((s, [, u]) => s + u.usd, 0) * k
     return { rows: rows.length, el: section(title, [[`${list.length} · `, C.gray], [fmtCost(total), C.light]], rows) }
   }
-  const useBoxes = [useBox('Skills', 'skill', '/'), useBox('Plugins', 'plugin'), useBox('MCP', 'mcp')].filter((x): x is NonNullable<typeof x> => !!x)
+  const useBoxes = [useBox('Skills', 'skill', '/'), useBox('Plugins', 'plugin'), useBox('MCP', 'mcp'), useBox('Tools', 'tool')].filter((x): x is NonNullable<typeof x> => !!x)
   const useRows = useBoxes.reduce((n, b) => n + 1 + 1 + b.rows, 0)
 
   // ── Token: main and each subagent, biggest first ───────────────────────────

@@ -279,10 +279,10 @@ export const register: Register = on => {
         }
         o.ctx = p.tok.in + p.tok.cr + p.tok.cw
         const pend = m.pend?.[o.id]
-        for (const kind of ['skill', 'plugin', 'mcp'] as const) {
+        for (const kind of ['skill', 'plugin', 'mcp', 'tool'] as const) {
           const keys = pend?.[kind] ?? []
           if (keys.length === 0) continue
-          const uses = ((m.uses ??= { skill: {}, plugin: {}, mcp: {} })[kind] ??= {})
+          const uses = ((m.uses ??= { skill: {}, plugin: {}, mcp: {}, tool: {} })[kind] ??= {})
           for (const key of keys) {
             const u = (uses[key] ??= { tok: 0, usd: 0 })
             u.tok += sumTok(p.tok) / keys.length
@@ -311,11 +311,11 @@ export const register: Register = on => {
     const start = await $.clock.now()
     await edit($, m => {
       const o = ownerOf(m, agentId)
-      const used = sourcesOf(tool, inp)
-      for (const kind of ['skill', 'plugin', 'mcp'] as const) {
+      const used: Partial<Record<'skill' | 'plugin' | 'mcp' | 'tool', string>> = { ...sourcesOf(tool, inp), tool }
+      for (const kind of ['skill', 'plugin', 'mcp', 'tool'] as const) {
         const key = used[kind]
         if (!key) continue
-        const list = (((m.pend ??= {})[o.id] ??= { skill: [], plugin: [], mcp: [] })[kind] ??= [])
+        const list = (((m.pend ??= {})[o.id] ??= { skill: [], plugin: [], mcp: [], tool: [] })[kind] ??= [])
         if (!list.includes(key)) list.push(key)
       }
       o.nTools++

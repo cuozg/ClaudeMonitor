@@ -7,6 +7,7 @@
 - **Agent flow**: subagents share the monitor pane: subagents on the left and the monitor on the right at a fixed 50 columns when the pane is 81+ columns wide, and a wider pane widens only the subagents, else the monitor on top and the subagents below. The halves scroll apart: the wheel over the subagents (or the scroll keys) scrolls them, while the monitor fits its half. Each subagent is its own section: a header row (state, label, model, type, context size and %, cost, elapsed time) and the timeline of its latest 8 steps (time, tool, target, lines changed or duration, errors), plus its report once finished. A hairline separates one subagent from the next. The half always shows, with **No agents yet** before the first subagent.
 - A **Hide agents / Show agents** button in the band above the prompt toggles the subagents half (and opens the pane when it is closed).
 - **Hide monitor** in the band hides only the monitor half: the pane stays open with the subagents alone. The pane closes once neither half has anything to show. `/monitor` still opens or closes the whole pane.
+- A **Tools** section below **MCP** lists every tool called (Bash, Read, Skill, mcp__…), with the tokens and cost of the requests that read its result, like the Skills, Plugins and MCP sections.
 
 ### Fixed
 
