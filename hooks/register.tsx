@@ -5,7 +5,7 @@ import type { AgentInfo, EngineInterface, Register } from 'claude-code'
 
 import type { CtxView, Mon, Owner, Task } from '../types'
 import { addTok, zero, describeTool, firstLine, lineDelta, newOwner, price, sourcesOf, sumTok, summaryLine, taskNotes } from './lib'
-import { drawBand, drawPane, type AgentsBox } from './view'
+import { DEFAULT_OPEN, drawBand, drawPane, type AgentsBox } from './view'
 
 const PANE = 'session-monitor'
 const TITLE = 'Monitor'
@@ -387,7 +387,7 @@ export const register: Register = on => {
         n.expanded = l.includes(id) ? l.filter(x => x !== id) : [...l, id]
       }).then(() => $.ui.invalidate('ui.render')),
       onToggleSection: id => void edit($, n => {
-        const l = n.opened ?? []
+        const l = n.opened ?? DEFAULT_OPEN
         n.opened = l.includes(id) ? l.filter(x => x !== id) : [...l, id]
       }).then(() => $.ui.invalidate('ui.render')),
     })

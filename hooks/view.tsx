@@ -96,6 +96,9 @@ export function attention(m: Mon, cx: CtxView | null, usage: SessionUsage, agent
 /** The monitor never grows wider than this; a wider pane gives the extra columns to the subagents. */
 const MONITOR_MAX = 100
 
+/** Monitor sections open until the user toggles one. */
+export const DEFAULT_OPEN = ['Cost', 'Context']
+
 export function drawMonitor({ Box, Text, Button }: Els, I: Input & { rows?: number; monOffset?: number; onToggleSection?: (id: string) => void }) {
   const { m, cx, usage, now, tick } = I
   const W = Math.max(30, Math.min(MONITOR_MAX, I.width))
@@ -149,9 +152,10 @@ export function drawMonitor({ Box, Text, Button }: Els, I: Input & { rows?: numb
     return line(...l, [' '.repeat(Math.max(1, w - textW(l) - textW(r)))], ...r)
   }
   /** A quiet section, one row each: a ▸/▾ button, a bold title, a hairline, a figure at the right, then the body once opened. */
-  const opened = new Set(m.opened ?? [])
+  const opened = new Set(m.opened ?? DEFAULT_OPEN)
   const section = (title: string, right: Seg[], body: RenderChildren[], w = iw, titleColor: string = C.light): RenderChildren[] => {
     const open = opened.has(title)
+    if (!body.some(Boolean)) body = [line(['none', C.dark])]
     const head = (
       <Box flexDirection="row" width={w}>
         <Button key={'sec:' + title} label={open ? '▾' : '▸'} onPress={() => I.onToggleSection?.(title)} />
@@ -200,9 +204,9 @@ export function drawMonitor({ Box, Text, Button }: Els, I: Input & { rows?: numb
   // ── Needs attention ────────────────────────────────────────────────────────
   const hot = alerts.some(a => a[1] === C.red)
   const alertCol = hot ? C.red : C.gold
-  const attentionBox = alerts.length > 0 && section(
+  const attentionBox = section(
     'Needs attention', [[String(alerts.length), alertCol, 'b']],
-    alerts.map(([text, col]) => line(['● ', col], [fit(text, iw - 3), col])), iw, alertCol,
+    alerts.map(([text, col]) => line(['● ', col], [fit(text, iw - 3), col])), iw, alerts.length ? alertCol : C.light,
   )
 
   // ── Cost ───────────────────────────────────────────────────────────────────
@@ -275,7 +279,6 @@ export function drawMonitor({ Box, Text, Button }: Els, I: Input & { rows?: numb
   // ── Skills, plugins, MCP and tools: tokens and cost of the requests that followed each one's use (main and subagents) ──
   const useBox = (title: string, kind: 'skill' | 'plugin' | 'mcp' | 'tool', prefix = '') => {
     const list = Object.entries(m.uses?.[kind] ?? {}).sort((a, b) => b[1].usd - a[1].usd)
-    if (list.length === 0) return null
     const nameW = Math.max(8, iw - 2 - 7 - 9 - 2)
     const rows = list.map(([name, u]) => line(
       ['● ', ACCENT], [fit(prefix + name, nameW).padEnd(nameW), C.light], [fmtTok(u.tok).padStart(7), C.gray], [fmtCost(u.usd * k).padStart(10), C.light],
@@ -312,7 +315,7 @@ export function drawMonitor({ Box, Text, Button }: Els, I: Input & { rows?: numb
     const [on, off] = bar(x.n / modelTot, mbw)
     return line(['● ', col], [fit(prettyModel(x.id), mlw).padEnd(mlw) + ' ', C.light], [on, col], [off, C.track], [fmtTok(x.n).padStart(7), C.gray], [(((x.n / modelTot) * 100).toFixed(0) + '%').padStart(5), C.dark], [fmtCost(x.usd).padStart(9), C.light])
   })
-  const modelBox = byModel.length > 0 && section('Model', [[`${byModel.length} used`, C.gray]], modelBody)
+  const modelBox = section('Model', [[`${byModel.length} used`, C.gray]], modelBody)
 
   // ── Background tasks ───────────────────────────────────────────────────────
   const ownerName = (id: string) => (id === 'main' ? 'main' : m.owners[id]?.label ?? id.slice(0, 6))
@@ -337,10 +340,10 @@ export function drawMonitor({ Box, Text, Button }: Els, I: Input & { rows?: numb
       t.state === 'run' && !!t.note && line(['  └ ', C.track], [fit(t.note, iw - 4), C.dark]),
     ]),
   ]
-  const monitorBox = monTasks.length > 0 && section('Monitor', [
+  const monitorBox = section('Monitor', [
     [`${runMon} running`, runMon ? ACCENT : C.gray], [` · ${monTasks.length - runMon} finished`, C.gray],
   ], taskRows(monTasks))
-  const tasksBox = bgTasks.length > 0 && section('Background tasks', [
+  const tasksBox = section('Background tasks', [
     [`${runBg} running`, runBg ? ACCENT : C.gray], [` · ${bgTasks.length - runBg} finished`, C.gray], [fails ? ` · ${fails} failed` : '', C.red],
   ], taskRows(bgTasks))
 

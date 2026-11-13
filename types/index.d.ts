@@ -59,7 +59,7 @@ export type Mon = {
   agentsClosed: boolean
   /** Finished subagents the user opened to review; the rest show only their header. */
   expanded?: string[]
-  /** Monitor sections the user opened (by title); the rest show only their title row. */
+  /** Monitor sections the user opened (by title); the rest show only their title row. Unset: Cost and Context. */
   opened?: string[]
   /** The main loop's last cache miss: when, and how many tokens it wrote again. */
   recache?: { ts: number; tok: number; n: number }

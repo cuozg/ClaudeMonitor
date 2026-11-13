@@ -49,14 +49,14 @@ function engine(on: On, { usage = USAGE as object, agents = true as boolean | ((
   return clock
 }
 
-/** Opens monitor sections by title: they start collapsed to their title row. */
+/** Toggles monitor sections by title: Cost and Context start open, the rest collapsed to their title row. */
 async function openSections($: Parameters<Parameters<typeof test>[1]>[0], ...titles: string[]) {
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   for (const t of titles) await ui.press({ key: 'sec:' + t })
   await ui.unmount()
 }
 
-test('monitor sections start collapsed to their title row and open with their button', async ($, on) => {
+test('Cost and Context start open, other sections start collapsed, and each toggles with its button', async ($, on) => {
   engine(on, { agents: false })
   const limit = async () => {
     const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
@@ -64,11 +64,15 @@ test('monitor sections start collapsed to their title row and open with their bu
     await ui.unmount()
     return r
   }
-  expect(await limit()).toEqual({ title: true, body: false, btn: '▸' })
-  await openSections($, 'Cost')
   expect(await limit()).toEqual({ title: true, body: true, btn: '▾' })
   await openSections($, 'Cost')
   expect(await limit()).toEqual({ title: true, body: false, btn: '▸' })
+  await openSections($, 'Cost')
+  expect(await limit()).toEqual({ title: true, body: true, btn: '▾' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await ui.find({ key: 'sec:Context' }))?.text).toBe('▾')
+  expect((await ui.find({ key: 'sec:Token' }))?.text).toBe('▸')
+  await ui.unmount()
 })
 
 test('the pane shows the bill, context and agents on every surface, without an activity log', async ($, on) => {
@@ -77,7 +81,6 @@ test('the pane shows the bill, context and agents on every surface, without an a
   await $.tool.call({ tool: 'Read', file_path: '/Users/me/shop/cart.ts' })
   await $.agent.spawn({ tool_use_id: 'tu1', prompt: 'review', description: 'review code', subagentType: 'Explore', provider: { plugin: 'engine' }, parentModel: 'claude-opus-5-5', background: false, fork: false } as never)
   for await (const _ of $.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 })) void _
-  await openSections($, 'Cost')
 
   for (const surface of ['terminal', 'desktop', 'vscode'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
@@ -137,10 +140,16 @@ test('what needs attention is highlighted in the pane, not in the band', async (
   await band.unmount()
 })
 
-test('a calm session shows no attention box', async ($, on) => {
+test('every section shows its title even with no data, and an empty one opens to none', async ($, on) => {
   engine(on, { agents: false })
-  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect(await ui.find({ type: 'Text', text: /Needs attention/ })).toBeUndefined()
+  const titles = ['Needs attention', 'Cost', 'Context', 'Token', 'Model', 'Skills', 'Plugins', 'MCP', 'Tools', 'Monitor', 'Background tasks']
+  let ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  for (const t of titles) expect(await ui.find({ key: 'sec:' + t })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^none$/ })).toBeUndefined()
+  await ui.unmount()
+  await openSections($, 'Needs attention')
+  ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ type: 'Text', text: /^none$/ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -299,17 +308,13 @@ test('the wheel scrolls only the half under it: the subagents, or the monitor', 
   const wheel = (column: number, by: number) =>
     $.ui.scroll({ component: 'Pane', requestId: 'session-monitor', offset: 0, by, bodyRows: 20, contentRows: 20, origin: { kind: 'person' }, pointer: { column, row: 3 } } as never)
   await wheel(200, 5)
+  expect(await draw()).toEqual({ top: true, shop: false })
+  await wheel(200, -5)
   expect(await draw()).toEqual({ top: true, shop: true })
   await wheel(10, 5)
   expect(await draw()).toEqual({ top: false, shop: true })
   await wheel(10, -5)
   expect(await draw()).toEqual({ top: true, shop: true })
-  await openSections($, 'Token')
-  expect((await draw()).shop).toBe(true)
-  await wheel(200, 5)
-  expect((await draw()).shop).toBe(false)
-  await wheel(200, -5)
-  expect((await draw()).shop).toBe(true)
 })
 
 test('a background agent task ends when the engine lists its agent as ended, without a SubagentStop', async ($, on) => {
@@ -318,8 +323,8 @@ test('a background agent task ends when the engine lists its agent as ended, wit
   await $.session.start({ cwd: '/Users/me/shop', surface: 'terminal', isInteractive: true })
   await $.agent.spawn({ tool_use_id: 'tu1', prompt: 'p', description: 'audit', subagentType: 'Explore', provider: { plugin: 'engine' }, parentModel: 'claude-opus-5-5', background: true, fork: false } as never)
   const tasks = async () => {
-    const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 80 } })
-    const t = (await ui.find({ type: 'Text', text: /^\d+ running$/ }))?.text
+    const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 80, scroll: { offset: 0, bodyRows: 80 } } })
+    const t = JSON.stringify(await ui.drawn()).match(/Background tasks.*?(\d+ running)/)?.[1]
     await ui.unmount()
     return t
   }
@@ -367,7 +372,7 @@ test('a Monitor section lists the monitor, and a turn end without it in flight g
   await $.tool.call({ tool: 'Monitor', description: 'watch deploy', command: 'tail -f log' } as never)
   await openSections($, 'Monitor')
   const draw = async () => {
-    const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 80 } })
+    const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 80, scroll: { offset: 0, bodyRows: 80 } } })
     const out = { section: !!(await ui.find({ type: 'Text', text: /^Monitor/ })), tick: !!(await ui.find({ type: 'Text', text: /^✓/ })) }
     await ui.unmount()
     return out
