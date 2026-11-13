@@ -96,7 +96,7 @@ export function attention(m: Mon, cx: CtxView | null, usage: SessionUsage, agent
 /** The monitor never grows wider than this; a wider pane gives the extra columns to the subagents. */
 const MONITOR_MAX = 100
 
-export function drawMonitor({ Box, Text }: Els, I: Input & { rows?: number }) {
+export function drawMonitor({ Box, Text, Button }: Els, I: Input & { rows?: number; monOffset?: number; onToggleSection?: (id: string) => void }) {
   const { m, cx, usage, now, tick } = I
   const W = Math.max(30, Math.min(MONITOR_MAX, I.width))
   const iw = W - 2 // inside the side padding
@@ -148,13 +148,18 @@ export function drawMonitor({ Box, Text }: Els, I: Input & { rows?: number }) {
     const r = right.filter((s): s is Seg => !!s)
     return line(...l, [' '.repeat(Math.max(1, w - textW(l) - textW(r)))], ...r)
   }
-  /** A quiet section: a bold title, a hairline, a figure at the right, then the body. */
-  const section = (title: string, right: Seg[], body: RenderChildren[], w = iw, titleColor: string = C.light) => (
-    <Box flexDirection="column" width={w}>
-      {line([title, titleColor, 'b'], [' ' + '─'.repeat(Math.max(2, w - vlen(title) - textW(right) - 2)) + ' ', C.track], ...right)}
-      {body}
-    </Box>
-  )
+  /** A quiet section, one row each: a ▸/▾ button, a bold title, a hairline, a figure at the right, then the body once opened. */
+  const opened = new Set(m.opened ?? [])
+  const section = (title: string, right: Seg[], body: RenderChildren[], w = iw, titleColor: string = C.light): RenderChildren[] => {
+    const open = opened.has(title)
+    const head = (
+      <Box flexDirection="row" width={w}>
+        <Button key={'sec:' + title} label={open ? '▾' : '▸'} onPress={() => I.onToggleSection?.(title)} />
+        {line([' '], [title, titleColor, 'b'], [' ' + '─'.repeat(Math.max(2, w - 4 - vlen(title) - textW(right) - 3)) + ' ', C.track], ...right)}
+      </Box>
+    )
+    return open ? [head, ...body.filter(Boolean)] : [head]
+  }
   /** A thin segmented bar: each part's share of `total`, the rest as track. */
   const stack = (parts: [number, string][], w: number, total: number): Seg[] => {
     const out: Seg[] = []
@@ -179,20 +184,18 @@ export function drawMonitor({ Box, Text }: Els, I: Input & { rows?: number }) {
     : state === 'waiting' ? ['◷ Waiting on agents', C.blue, 'b']
     : ['○ Idle', C.gray, 'b']
   const doing = flight && state === 'working' ? fit(flight.desc, Math.max(10, iw - 24)) + ' ' + fmtDur(now - flight.ts) : ''
-  const header = (
-    <Box flexDirection="column">
-      {line(['API ', C.dark], [I.provider, C.light, 'b'])}
-      <Box flexDirection="row" justifyContent="space-between" columnGap={1}>
-        {line(stateSeg, ['  ', undefined], [project, undefined, 'b'])}
-        {line(['session ', C.dark], [fmtDur(t1 - t0), C.light])}
-      </Box>
-      {line(
-        [fit(path, Math.max(8, iw - 40)), C.dark], [' · ', C.track], [I.sid.slice(0, 8), C.dark], [' · ', C.track],
-        [prettyModel(main.model), C.gray], !!main.effort && [' · ' + main.effort, C.dark], [' · since ' + hhmmss(t0).slice(0, 5), C.dark],
-      )}
-      {!!doing && line(['» ', ACCENT], [doing, C.gray])}
-    </Box>
-  )
+  const header = [
+    line(['API ', C.dark], [I.provider, C.light, 'b']),
+    <Box flexDirection="row" justifyContent="space-between" columnGap={1}>
+      {line(stateSeg, ['  ', undefined], [project, undefined, 'b'])}
+      {line(['session ', C.dark], [fmtDur(t1 - t0), C.light])}
+    </Box>,
+    line(
+      [fit(path, Math.max(8, iw - 40)), C.dark], [' · ', C.track], [I.sid.slice(0, 8), C.dark], [' · ', C.track],
+      [prettyModel(main.model), C.gray], !!main.effort && [' · ' + main.effort, C.dark], [' · since ' + hhmmss(t0).slice(0, 5), C.dark],
+    ),
+    !!doing && line(['» ', ACCENT], [doing, C.gray]),
+  ].filter(Boolean)
 
   // ── Needs attention ────────────────────────────────────────────────────────
   const hot = alerts.some(a => a[1] === C.red)
@@ -274,26 +277,21 @@ export function drawMonitor({ Box, Text }: Els, I: Input & { rows?: number }) {
     const list = Object.entries(m.uses?.[kind] ?? {}).sort((a, b) => b[1].usd - a[1].usd)
     if (list.length === 0) return null
     const nameW = Math.max(8, iw - 2 - 7 - 9 - 2)
-    const rows = list.slice(0, 8).map(([name, u]) => line(
+    const rows = list.map(([name, u]) => line(
       ['● ', ACCENT], [fit(prefix + name, nameW).padEnd(nameW), C.light], [fmtTok(u.tok).padStart(7), C.gray], [fmtCost(u.usd * k).padStart(10), C.light],
     ))
-    if (list.length > 8) rows.push(line([`  +${list.length - 8} more`, C.dark]))
     const total = list.reduce((s, [, u]) => s + u.usd, 0) * k
-    return { rows: rows.length, el: section(title, [[`${list.length} · `, C.gray], [fmtCost(total), C.light]], rows) }
+    return section(title, [[`${list.length} · `, C.gray], [fmtCost(total), C.light]], rows)
   }
-  const useBoxes = [useBox('Skills', 'skill', '/'), useBox('Plugins', 'plugin'), useBox('MCP', 'mcp'), useBox('Tools', 'tool')].filter((x): x is NonNullable<typeof x> => !!x)
-  const useRows = useBoxes.reduce((n, b) => n + 1 + 1 + b.rows, 0)
+  const useBoxes = [useBox('Skills', 'skill', '/'), useBox('Plugins', 'plugin'), useBox('MCP', 'mcp'), useBox('Tools', 'tool')]
 
   // ── Token: main and each subagent, biggest first ───────────────────────────
   const totalTok = sumTok(tok) || 1
-  const TOKEN_MAX = 8
   const byTok = all.map(o => ({ o, n: sumTok(o.tok) })).sort((x, y) => y.n - x.n)
-  const tokShown = byTok.slice(0, TOKEN_MAX)
-  const tokRest = byTok.slice(TOKEN_MAX)
   const tlw = Math.max(8, Math.min(22, Math.floor(iw / 4))) // shared by the Token and Model rows so their columns line up
   const tbw = Math.max(4, iw - 2 - tlw - 1 - 7 - 5 - 9 - 1)
   const tokenBody = [
-    ...tokShown.map(({ o, n }) => {
+    ...byTok.map(({ o, n }) => {
       const col = colorOf(o)
       const [on, off] = bar(n / totalTok, tbw)
       return line(
@@ -301,7 +299,6 @@ export function drawMonitor({ Box, Text }: Els, I: Input & { rows?: number }) {
         [fmtTok(n).padStart(7), C.gray], [(((n / totalTok) * 100).toFixed(0) + '%').padStart(5), C.dark], [fmtCost(cost(o)).padStart(9), C.light],
       )
     }),
-    tokRest.length > 0 && line([`  +${tokRest.length} more · ${fmtTok(tokRest.reduce((t, x) => t + x.n, 0))}`, C.dark]),
   ]
   const tokenBox = section('Token', [[fmtTok(sumTok(tok)), C.gray]], tokenBody)
 
@@ -310,7 +307,7 @@ export function drawMonitor({ Box, Text }: Els, I: Input & { rows?: number }) {
   const modelTot = byModel.reduce((t, x) => t + x.n, 0) || 1
   const mlw = tlw
   const mbw = tbw
-  const modelBody = byModel.slice(0, 6).map(x => {
+  const modelBody = byModel.map(x => {
     const col = modelColor(x.id)
     const [on, off] = bar(x.n / modelTot, mbw)
     return line(['● ', col], [fit(prettyModel(x.id), mlw).padEnd(mlw) + ' ', C.light], [on, col], [off, C.track], [fmtTok(x.n).padStart(7), C.gray], [(((x.n / modelTot) * 100).toFixed(0) + '%').padStart(5), C.dark], [fmtCost(x.usd).padStart(9), C.light])
@@ -331,56 +328,37 @@ export function drawMonitor({ Box, Text }: Els, I: Input & { rows?: number }) {
   const runMon = monTasks.filter(t => t.state === 'run').length
   const runBg = bgTasks.filter(t => t.state === 'run').length
   const fails = bgTasks.filter(t => t.state === 'fail').length
-  const taskLines = (t: Task) => 1 + Number(t.state === 'run' && !!t.note)
-  /** The pane never scrolls: tasks shrink to the rows left under the fixed blocks. */
-  const rowsOf = (body: unknown[]) => body.filter(Boolean).length
-  // header, then each block under a one-row gap; the context block sits under the cost block
-  const topRows = 1 + rowsOf(billBody) + 1 + rowsOf(contextBody) + 1
-  const fixedRows = 3 + useRows + (doing ? 1 : 0) + (attentionBox ? 1 + alerts.length + 1 : 0) + 1 + topRows + 1 + 1 + rowsOf(tokenBody) + (modelBox ? 1 + 1 + rowsOf(modelBody) : 0)
-  const secRows = (list: Task[], n: number) => (n > 0 ? 2 + list.slice(0, n).reduce((s, t) => s + taskLines(t), 0) + Number(list.length > n) : 0)
-  let monN = Math.min(4, monTasks.length)
-  let bgN = Math.min(8, bgTasks.length)
-  if (I.rows && I.rows > 0) {
-    while (monN + bgN > 0 && fixedRows + secRows(monTasks, monN) + secRows(bgTasks, bgN) > I.rows) {
-      if (bgN > 0) bgN--
-      else monN--
-    }
-  }
-  const taskRows = (list: Task[], n: number) => [
-    ...list.slice(0, n).flatMap(t => [
+  const taskRows = (list: Task[]) => [
+    ...list.flatMap(t => [
       line(
         icon(t), [' ' + fit(t.desc, descW).padEnd(descW) + ' ', t.state === 'fail' ? C.red : t.state === 'run' ? undefined : C.gray],
         [fit(ownerName(t.owner), ownW).padEnd(ownW), ownerCol(t.owner)], [fmtDur((t.end || now) - t.start).padStart(10), C.dark], [' ' + result(t)[0].padStart(12), result(t)[1]],
       ),
       t.state === 'run' && !!t.note && line(['  └ ', C.track], [fit(t.note, iw - 4), C.dark]),
     ]),
-    list.length > n && line([`  +${list.length - n} older`, C.dark]),
   ]
-  const monitorBox = monN > 0 && section('Monitor', [
+  const monitorBox = monTasks.length > 0 && section('Monitor', [
     [`${runMon} running`, runMon ? ACCENT : C.gray], [` · ${monTasks.length - runMon} finished`, C.gray],
-  ], taskRows(monTasks, monN))
-  const tasksBox = bgN > 0 && section('Background tasks', [
+  ], taskRows(monTasks))
+  const tasksBox = bgTasks.length > 0 && section('Background tasks', [
     [`${runBg} running`, runBg ? ACCENT : C.gray], [` · ${bgTasks.length - runBg} finished`, C.gray], [fails ? ` · ${fails} failed` : '', C.red],
-  ], taskRows(bgTasks, bgN))
+  ], taskRows(bgTasks))
 
-  return (
-    <Box flexDirection="column" width={W} paddingX={1}>
-      {[
-        header,
-        attentionBox,
-        <Box flexDirection="column" width={iw}>
-          {bill}
-          {gap}
-          {context}
-        </Box>,
-        tokenBox,
-        modelBox,
-        ...useBoxes.map(b => b.el),
-        monitorBox,
-        tasksBox,
-      ].filter(Boolean).flatMap((block, i) => (i ? [gap, block] : [block]))}
-    </Box>
-  )
+  // One row per element, so the monitor scrolls a window of `rows` rows from `monOffset`.
+  const rows = [header, attentionBox, bill, context, tokenBox, modelBox, ...useBoxes, monitorBox, tasksBox]
+    .filter((b): b is RenderChildren[] => !!b)
+    .flatMap((block, i) => (i ? [gap, ...block] : block))
+  const viewH = I.rows && I.rows > 0 ? I.rows : rows.length
+  const max = Math.max(0, rows.length - viewH)
+  const off = Math.min(Math.max(0, I.monOffset ?? 0), max)
+  return {
+    max,
+    el: (
+      <Box flexDirection="column" width={W} height={viewH} paddingX={1} overflow="hidden">
+        {rows.slice(off, off + viewH)}
+      </Box>
+    ),
+  }
 }
 
 type BandEls = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
@@ -452,10 +430,13 @@ const SPLIT_COLUMNS = MONITOR_SIDE + 1 + 30
  * MONITOR_SIDE columns when wide, monitor on top when narrow, with a line between them. The subagents half shows even
  * before the first subagent. The monitor fits its part; the subagents scroll from `offset`.
  */
-export function drawPane(els: Els, I: Input & { rows: number; offset: number; showMonitor: boolean; showAgents: boolean; onToggleAgent: (id: string) => void }): { el: RenderChildren; agents?: AgentsBox; max: number } {
+export function drawPane(els: Els, I: Input & { rows: number; offset: number; monOffset: number; showMonitor: boolean; showAgents: boolean; onToggleAgent: (id: string) => void; onToggleSection: (id: string) => void }): { el: RenderChildren; agents?: AgentsBox; max: number; monitor?: AgentsBox; monMax: number } {
   const { m } = I
   const subs = m.order.slice(1).map(id => m.owners[id]!).filter(Boolean)
-  if (!I.showAgents) return { el: drawMonitor(els, I), max: 0 }
+  if (!I.showAgents) {
+    const mon = drawMonitor(els, I)
+    return { el: mon.el, max: 0, monitor: { column: 0, row: 0, width: Math.max(30, I.width), height: I.rows }, monMax: mon.max }
+  }
   const { Box, Text } = els
   const W = Math.max(30, I.width)
   const wide = W >= SPLIT_COLUMNS
@@ -465,6 +446,7 @@ export function drawPane(els: Els, I: Input & { rows: number; offset: number; sh
     : wide ? { column: 0, row: 0, width: W - monW - 1, height: I.rows }
     : { column: 0, row: half + 1, width: W, height: Math.max(1, I.rows - half - 1) }
   const monRows = wide ? I.rows : half
+  const mon = I.showMonitor ? drawMonitor(els, { ...I, width: monW, rows: monRows }) : undefined
   const states = classify(m, I.agents, I.now)
   const { k } = billOf(m, I.usage)
   const flow = drawFlow(els, {
@@ -476,9 +458,11 @@ export function drawPane(els: Els, I: Input & { rows: number; offset: number; sh
   return {
     agents: box,
     max: flow.max,
+    monitor: mon && { column: wide ? W - monW : 0, row: 0, width: monW, height: monRows },
+    monMax: mon?.max ?? 0,
     el: (
       <Box flexDirection={wide ? 'row-reverse' : 'column'} width={W}>
-        {I.showMonitor && <Box width={monW} height={monRows} overflow="hidden">{drawMonitor(els, { ...I, width: monW, rows: monRows })}</Box>}
+        {mon && <Box width={monW} height={monRows} overflow="hidden">{mon.el}</Box>}
         {I.showMonitor && (wide
           ? <Box flexDirection="column" width={1} height={I.rows}>{Array.from({ length: I.rows }, () => <Text mono color={C.track}>│</Text>)}</Box>
           : <Text mono color={C.track}>{'─'.repeat(W)}</Text>)}

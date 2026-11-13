@@ -59,6 +59,8 @@ export type Mon = {
   agentsClosed: boolean
   /** Finished subagents the user opened to review; the rest show only their header. */
   expanded?: string[]
+  /** Monitor sections the user opened (by title); the rest show only their title row. */
+  opened?: string[]
   /** The main loop's last cache miss: when, and how many tokens it wrote again. */
   recache?: { ts: number; tok: number; n: number }
   /** Tokens and raw dollars of the requests that read each skill, plugin, MCP server or tool's result, main and subagents together. */

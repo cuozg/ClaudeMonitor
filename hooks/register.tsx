@@ -23,6 +23,10 @@ let tick = 0
 let agentsOff = 0
 let agentsMax = 0
 let agentsBox: AgentsBox | undefined
+// The monitor scrolls the same way, on its own.
+let monOff = 0
+let monMax = 0
+let monBox: AgentsBox | undefined
 
 const ownerOf = (m: Mon, id: string | undefined): Owner => {
   const key = id ?? 'main'
@@ -377,28 +381,34 @@ export const register: Register = on => {
       : baseUrl ? 'Gateway · ' + (baseUrl.replace(/^\w+:\/\//, '').split('/')[0] ?? baseUrl)
       : 'Anthropic API'
     const pane = drawPane(els, {
-      m, cx, usage, agents, now, cwd, home, provider, sid, tick, width: e.props.bodyColumns, rows: e.props.scroll.bodyRows, offset: agentsOff, showMonitor: !m.monitorClosed, showAgents: !m.agentsClosed,
+      m, cx, usage, agents, now, cwd, home, provider, sid, tick, width: e.props.bodyColumns, rows: e.props.scroll.bodyRows, offset: agentsOff, monOffset: monOff, showMonitor: !m.monitorClosed, showAgents: !m.agentsClosed,
       onToggleAgent: id => void edit($, n => {
         const l = n.expanded ?? []
         n.expanded = l.includes(id) ? l.filter(x => x !== id) : [...l, id]
+      }).then(() => $.ui.invalidate('ui.render')),
+      onToggleSection: id => void edit($, n => {
+        const l = n.opened ?? []
+        n.opened = l.includes(id) ? l.filter(x => x !== id) : [...l, id]
       }).then(() => $.ui.invalidate('ui.render')),
     })
     agentsBox = pane.agents
     agentsMax = pane.max
     agentsOff = Math.min(agentsOff, agentsMax)
+    monBox = pane.monitor
+    monMax = pane.monMax
+    monOff = Math.min(monOff, monMax)
     return pane.el
   })
 
-  // The pane's halves scroll apart: the wheel over the subagents (or the scroll keys) moves only them; the monitor fits its half.
+  // The pane's halves scroll apart: the wheel moves the half under the pointer; the scroll keys move the subagents (else the monitor).
   on('ui.scroll', { requestId: PANE }, ($, e, next) => {
-    const box = agentsBox
-    if (!box) return next(e)
     const p = e.pointer
-    const over = !p || (p.column >= box.column && p.column < box.column + box.width && p.row >= box.row && p.row < box.row + box.height)
-    if (over) {
-      agentsOff = Math.max(0, Math.min(agentsMax, agentsOff + e.by))
-      $.ui.invalidate('ui.render')
-    }
+    const over = (box: AgentsBox | undefined) =>
+      !!box && (!p || (p.column >= box.column && p.column < box.column + box.width && p.row >= box.row && p.row < box.row + box.height))
+    if (over(agentsBox)) agentsOff = Math.max(0, Math.min(agentsMax, agentsOff + e.by))
+    else if (over(monBox)) monOff = Math.max(0, Math.min(monMax, monOff + e.by))
+    else return next(e)
+    $.ui.invalidate('ui.render')
     return {}
   })
 

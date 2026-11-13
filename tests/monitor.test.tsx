@@ -49,12 +49,35 @@ function engine(on: On, { usage = USAGE as object, agents = true as boolean | ((
   return clock
 }
 
+/** Opens monitor sections by title: they start collapsed to their title row. */
+async function openSections($: Parameters<Parameters<typeof test>[1]>[0], ...titles: string[]) {
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  for (const t of titles) await ui.press({ key: 'sec:' + t })
+  await ui.unmount()
+}
+
+test('monitor sections start collapsed to their title row and open with their button', async ($, on) => {
+  engine(on, { agents: false })
+  const limit = async () => {
+    const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+    const r = { title: !!(await ui.find({ type: 'Text', text: /^Cost$/ })), body: !!(await ui.find({ type: 'Text', text: /5h limit/ })), btn: (await ui.find({ key: 'sec:Cost' }))?.text }
+    await ui.unmount()
+    return r
+  }
+  expect(await limit()).toEqual({ title: true, body: false, btn: '▸' })
+  await openSections($, 'Cost')
+  expect(await limit()).toEqual({ title: true, body: true, btn: '▾' })
+  await openSections($, 'Cost')
+  expect(await limit()).toEqual({ title: true, body: false, btn: '▸' })
+})
+
 test('the pane shows the bill, context and agents on every surface, without an activity log', async ($, on) => {
   engine(on)
   await $.session.start({ cwd: '/Users/me/shop', surface: 'terminal', isInteractive: true })
   await $.tool.call({ tool: 'Read', file_path: '/Users/me/shop/cart.ts' })
   await $.agent.spawn({ tool_use_id: 'tu1', prompt: 'review', description: 'review code', subagentType: 'Explore', provider: { plugin: 'engine' }, parentModel: 'claude-opus-5-5', background: false, fork: false } as never)
   for await (const _ of $.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 })) void _
+  await openSections($, 'Cost')
 
   for (const surface of ['terminal', 'desktop', 'vscode'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
@@ -104,6 +127,7 @@ test('the header pill follows the main state, not recent activity', async ($, on
 test('what needs attention is highlighted in the pane, not in the band', async ($, on) => {
   engine(on, { usage: { ...USAGE, rateLimits: [{ kind: 'five_hour', percentUsed: 92 }] }, agents: false, panes: false })
   on('ui.panes', () => ({ value: [] }))
+  await openSections($, 'Needs attention')
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect(await pane.find({ type: 'Text', text: /Needs attention/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /5h limit at 92%/ })).toBeDefined()
@@ -257,7 +281,7 @@ test('the monitor keeps a fixed 50 columns beside the subagents, and stacks abov
   expect(narrow).toContain('─'.repeat(70))
 })
 
-test('the wheel over the subagents scrolls them alone; over the monitor it moves nothing', async ($, on) => {
+test('the wheel scrolls only the half under it: the subagents, or the monitor', async ($, on) => {
   engine(on)
   await $.session.start({ cwd: '/Users/me/shop', surface: 'terminal', isInteractive: true })
   for (let i = 1; i <= 30; i++) {
@@ -280,6 +304,12 @@ test('the wheel over the subagents scrolls them alone; over the monitor it moves
   expect(await draw()).toEqual({ top: false, shop: true })
   await wheel(10, -5)
   expect(await draw()).toEqual({ top: true, shop: true })
+  await openSections($, 'Token')
+  expect((await draw()).shop).toBe(true)
+  await wheel(200, 5)
+  expect((await draw()).shop).toBe(false)
+  await wheel(200, -5)
+  expect((await draw()).shop).toBe(true)
 })
 
 test('a background agent task ends when the engine lists its agent as ended, without a SubagentStop', async ($, on) => {
@@ -335,6 +365,7 @@ test('a Monitor section lists the monitor, and a turn end without it in flight g
   on('classic.Stop', () => ({}))
   await $.session.start({ cwd: '/Users/me/shop', surface: 'terminal', isInteractive: true })
   await $.tool.call({ tool: 'Monitor', description: 'watch deploy', command: 'tail -f log' } as never)
+  await openSections($, 'Monitor')
   const draw = async () => {
     const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 80 } })
     const out = { section: !!(await ui.find({ type: 'Text', text: /^Monitor/ })), tick: !!(await ui.find({ type: 'Text', text: /^✓/ })) }
@@ -352,6 +383,7 @@ test('the pane names the API provider and the skills, plugins, MCP servers and t
   await $.tool.call({ tool: 'Skill', skill: 'unity:unity-cli' } as never)
   await $.tool.call({ tool: 'mcp__analytics-mcp__run_report' } as never)
   for await (const _ of $.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 })) void _
+  await openSections($, 'Skills', 'Plugins', 'MCP', 'Tools')
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   const text = JSON.stringify(await ui.drawn())
   await ui.unmount()
