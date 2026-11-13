@@ -395,3 +395,15 @@ test('the pane names the API provider and the skills, plugins, MCP servers and t
   expect(text).toContain('Anthropic API')
   for (const name of ['Skills', 'Plugins', 'MCP', 'Tools', 'Skill ', '/unity:unity-', 'analytics-mcp']) expect(text).toContain(name)
 })
+
+test('at 50 columns every section header shows its whole figure, moving it to a row of its own when the title leaves no room', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: '/Users/me/shop', surface: 'terminal', isInteractive: true })
+  await $.agent.spawn({ tool_use_id: 'tu1', prompt: 'p', description: 'worker', subagentType: 'Explore', provider: { plugin: 'engine' }, parentModel: 'claude-opus-5-5', background: false, fork: false } as never)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 81 } })
+  const tree = JSON.stringify(await ui.drawn()).split('"width":1,"height":60')[0]! // the monitor half, before the divider
+  expect(tree).toContain('"children":[" · 0 finished"]')
+  expect(tree).toContain('"justifyContent":"flex-end","width":48')
+  expect(tree).not.toContain('…')
+  await ui.unmount()
+})

@@ -156,13 +156,18 @@ export function drawMonitor({ Box, Text, Button }: Els, I: Input & { rows?: numb
   const section = (title: string, right: Seg[], body: RenderChildren[], w = iw, titleColor: string = C.light): RenderChildren[] => {
     const open = opened.has(title)
     if (!body.some(Boolean)) body = [line(['none', C.dark])]
+    // The button draws `[ ▸ ]`; when the figure won't fit beside the title it moves to its own row, never cut.
+    const fits = 5 + 1 + vlen(title) + 4 + textW(right) + 1 <= w
     const head = (
       <Box flexDirection="row" width={w}>
         <Button key={'sec:' + title} label={open ? '▾' : '▸'} onPress={() => I.onToggleSection?.(title)} />
-        {line([' '], [title, titleColor, 'b'], [' ' + '─'.repeat(Math.max(2, w - 4 - vlen(title) - textW(right) - 3)) + ' ', C.track], ...right)}
+        <Box flexShrink={0}>{line([' '], [title, titleColor, 'b'], [' ', undefined])}</Box>
+        <Box flexGrow={1} flexShrink={1} overflow="hidden">{line(['─'.repeat(w), C.track])}</Box>
+        {fits && <Box flexShrink={0}>{line([' ', undefined], ...right)}</Box>}
       </Box>
     )
-    return open ? [head, ...body.filter(Boolean)] : [head]
+    const tail = !fits && <Box flexDirection="row" justifyContent="flex-end" width={w}>{line(...right)}</Box>
+    return [head, tail, ...(open ? body.filter(Boolean) : [])].filter(Boolean)
   }
   /** A thin segmented bar: each part's share of `total`, the rest as track. */
   const stack = (parts: [number, string][], w: number, total: number): Seg[] => {
@@ -195,7 +200,7 @@ export function drawMonitor({ Box, Text, Button }: Els, I: Input & { rows?: numb
       {line(['session ', C.dark], [fmtDur(t1 - t0), C.light])}
     </Box>,
     line(
-      [fit(path, Math.max(8, iw - 40)), C.dark], [' · ', C.track], [I.sid.slice(0, 8), C.dark], [' · ', C.track],
+      [fit(path, Math.max(8, iw - 25 - vlen(prettyModel(main.model)) - (main.effort ? 3 + vlen(main.effort) : 0))), C.dark], [' · ', C.track], [I.sid.slice(0, 8), C.dark], [' · ', C.track],
       [prettyModel(main.model), C.gray], !!main.effort && [' · ' + main.effort, C.dark], [' · since ' + hhmmss(t0).slice(0, 5), C.dark],
     ),
     !!doing && line(['» ', ACCENT], [doing, C.gray]),
