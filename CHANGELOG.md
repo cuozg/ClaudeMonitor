@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- On Desktop and VS Code both halves of the pane scroll again: a row with a ▸ / ▾ button draws about two text rows tall there, and the halves now count it so, instead of overflowing with nothing to scroll.
+- Rows no longer squeeze into garbled lines when a half is full: each keeps its height and the half clips at its bottom edge.
+- A multi-line agent label, step or report stays on one row instead of breaking the subagents half.
+
 ## 2.3.0 (2026-11-15)
 
 ### Added

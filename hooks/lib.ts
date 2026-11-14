@@ -102,10 +102,25 @@ export function hhmmss(ts: number): string {
 }
 export function fit(s: string, w: number): string {
   if (w <= 0) return ''
-  const chars = Array.from(s)
-  return chars.length <= w ? s : chars.slice(0, Math.max(0, w - 1)).join('') + '…'
+  // One row: a newline or tab in a label, step or report would wrap it over the rows below.
+  const t = s.replace(/[\r\n\t]+/g, ' ')
+  const chars = Array.from(t)
+  return chars.length <= w ? t : chars.slice(0, Math.max(0, w - 1)).join('') + '…'
 }
 export const vlen = (s: string) => Array.from(s).length
+
+/**
+ * The rows of a list that show in `height` cells from row `offset`, each row `hs[i]` cells tall (a native button
+ * draws taller than a text row off the terminal); `max`, the last offset that still fills the window.
+ */
+export function windowOf<T>(rows: T[], hs: number[], height: number, offset: number): { max: number; shown: T[] } {
+  let max = rows.length
+  for (let acc = 0; max > 0 && acc + (hs[max - 1] ?? 1) <= height; ) acc += hs[--max] ?? 1
+  const off = Math.min(Math.max(0, offset), max)
+  let end = off
+  for (let acc = 0; end < rows.length && acc < height; ) acc += hs[end++] ?? 1
+  return { max, shown: rows.slice(off, end) }
+}
 
 /** A bar `w` cells wide, filled to `frac`: the filled part and the rest. */
 export function bar(frac: number, w: number): [string, string] {

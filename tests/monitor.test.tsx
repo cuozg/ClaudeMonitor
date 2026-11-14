@@ -1,6 +1,8 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
+import { fit, windowOf } from '../hooks/lib'
+
 const PANE = {
   plugin: 'session-monitor',
   component: 'Pane',
@@ -323,7 +325,7 @@ test('a background agent task ends when the engine lists its agent as ended, wit
   await $.session.start({ cwd: '/Users/me/shop', surface: 'terminal', isInteractive: true })
   await $.agent.spawn({ tool_use_id: 'tu1', prompt: 'p', description: 'audit', subagentType: 'Explore', provider: { plugin: 'engine' }, parentModel: 'claude-opus-5-5', background: true, fork: false } as never)
   const tasks = async () => {
-    const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 80, scroll: { offset: 0, bodyRows: 80 } } })
+    const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 80, scroll: { offset: 0, bodyRows: 120 } } })
     const t = JSON.stringify(await ui.drawn()).match(/Background tasks.*?(\d+ running)/)?.[1]
     await ui.unmount()
     return t
@@ -372,7 +374,7 @@ test('a Monitor section lists the monitor, and a turn end without it in flight g
   await $.tool.call({ tool: 'Monitor', description: 'watch deploy', command: 'tail -f log' } as never)
   await openSections($, 'Monitor')
   const draw = async () => {
-    const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 80, scroll: { offset: 0, bodyRows: 80 } } })
+    const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 80, scroll: { offset: 0, bodyRows: 120 } } })
     const out = { section: !!(await ui.find({ type: 'Text', text: /^Monitor/ })), tick: !!(await ui.find({ type: 'Text', text: /^✓/ })) }
     await ui.unmount()
     return out
@@ -406,4 +408,18 @@ test('at 50 columns every section header shows its whole figure, moving it to a 
   expect(tree).toContain('"justifyContent":"flex-end","width":48')
   expect(tree).not.toContain('…')
   await ui.unmount()
+})
+
+test('off the terminal a Button row takes more cells, so a list of them scrolls instead of overflowing', () => {
+  const rows = Array.from({ length: 10 }, (_, i) => i)
+  // Ten rows fit ten cells on the terminal: nothing to scroll.
+  expect(windowOf(rows, rows.map(() => 1), 10, 0)).toEqual({ max: 0, shown: rows })
+  // Two cells each: five show, and the window scrolls to the last five.
+  expect(windowOf(rows, rows.map(() => 2), 10, 0)).toEqual({ max: 5, shown: [0, 1, 2, 3, 4] })
+  expect(windowOf(rows, rows.map(() => 2), 10, 99)).toEqual({ max: 5, shown: [5, 6, 7, 8, 9] })
+})
+
+test('a multi-line label, step or report stays on one row', () => {
+  expect(fit('line one\nline two\r\n\tthree', 40)).toBe('line one line two three')
+  expect(fit('a\nb\nc', 3)).toBe('a …')
 })

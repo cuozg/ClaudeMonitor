@@ -2,7 +2,7 @@
 import type { Elements } from 'claude-code'
 
 import type { Owner } from '../types'
-import { C, SPIN, fit, fmtCost, fmtTok, modelColor, prettyModel, vlen } from './lib'
+import { C, SPIN, fit, fmtCost, fmtTok, modelColor, prettyModel, vlen, windowOf } from './lib'
 
 type Els = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
 type Seg = [string, string?, ('b' | 'd' | 'i')?]
@@ -18,6 +18,8 @@ export type FlowInput = {
   height: number
   /** The first row shown: the column scrolls on its own, clamped to its rows. */
   offset: number
+  /** The cells a row with a Button takes: 1 on the terminal, more where the surface draws a native button. */
+  btnRows?: number
   /** Finished agents the user opened; the others show only their header. */
   expanded: Set<string>
   onToggle: (id: string) => void
@@ -115,14 +117,21 @@ export function drawFlow({ Box, Text, Button }: Els, I: FlowInput) {
 
   // A hairline separates one subagent session from the next; the column shows a window of `height` rows from `offset`.
   const rule = <Text mono color={C.track}>{'─'.repeat(Math.max(1, I.width))}</Text>
-  const rows = agents.flatMap((o, i) => (i ? [rule, ...section(o)] : section(o)))
-  const max = Math.max(0, rows.length - I.height)
-  const off = Math.min(Math.max(0, I.offset), max)
+  // A finished agent's header holds its Button; every other row is one text row.
+  const btn = I.btnRows ?? 1
+  const hs: number[] = []
+  const rows = agents.flatMap((o, i) => {
+    const live = ['run', 'stall'].includes(states.get(o.id) ?? 'run')
+    const sec = section(o)
+    hs.push(...(i ? [1] : []), ...sec.map((_, j) => (j || live ? 1 : btn)))
+    return i ? [rule, ...sec] : sec
+  })
+  const { max, shown } = windowOf(rows, hs, I.height, I.offset)
   return {
     max,
     el: (
       <Box flexDirection="column" width={I.width} height={I.height} overflow="hidden">
-        {rows.slice(off, off + I.height)}
+        {shown.map(el => <Box flexShrink={0}>{el}</Box>)}
       </Box>
     ),
   }

@@ -13,6 +13,8 @@ const TITLE = 'Monitor'
 const DOCK_COLUMNS = 400
 const MAX_TS = 400
 const MAX_STEPS = 40
+// A native button off the terminal (desktop, VS Code) draws about two text rows tall.
+const BUTTON_ROWS = 2
 
 const empty = (): Mon => ({ owners: { main: newOwner('main', 'main') }, order: ['main'], tasks: [], samples: [], working: false, closed: false, monitorClosed: false, agentsClosed: false })
 const data = atom({ plugin: 'session-monitor', key: 'data' } as const, empty(), { shape: 'mon-3' })
@@ -381,7 +383,7 @@ export const register: Register = on => {
       : baseUrl ? 'Gateway · ' + (baseUrl.replace(/^\w+:\/\//, '').split('/')[0] ?? baseUrl)
       : 'Anthropic API'
     const pane = drawPane(els, {
-      m, cx, usage, agents, now, cwd, home, provider, sid, tick, width: e.props.bodyColumns, rows: e.props.scroll.bodyRows, offset: agentsOff, monOffset: monOff, showMonitor: !m.monitorClosed, showAgents: !m.agentsClosed,
+      m, cx, usage, agents, now, cwd, home, provider, sid, tick, width: e.props.bodyColumns, rows: e.props.scroll.bodyRows, offset: agentsOff, monOffset: monOff, btnRows: e.surface === 'terminal' ? 1 : BUTTON_ROWS, showMonitor: !m.monitorClosed, showAgents: !m.agentsClosed,
       onToggleAgent: id => void edit($, n => {
         const l = n.expanded ?? []
         n.expanded = l.includes(id) ? l.filter(x => x !== id) : [...l, id]

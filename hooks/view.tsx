@@ -5,7 +5,7 @@ import type { CtxView, Mon, Owner, Task } from '../types'
 import { drawFlow } from './flow'
 import {
   C, LANE, SPIN, STALL_MS, bar, fit, fmtCost, fmtDur, fmtTok, hhmmss, hitRate, modelColor,
-  prettyModel, sumTok, vlen, zero, addTok,
+  prettyModel, sumTok, vlen, zero, addTok, windowOf,
 } from './lib'
 
 type Els = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
@@ -99,7 +99,7 @@ const MONITOR_MAX = 100
 /** Monitor sections open until the user toggles one. */
 export const DEFAULT_OPEN = ['Cost', 'Context']
 
-export function drawMonitor({ Box, Text, Button }: Els, I: Input & { rows?: number; monOffset?: number; onToggleSection?: (id: string) => void }) {
+export function drawMonitor({ Box, Text, Button }: Els, I: Input & { rows?: number; monOffset?: number; btnRows?: number; onToggleSection?: (id: string) => void }) {
   const { m, cx, usage, now, tick } = I
   const W = Math.max(30, Math.min(MONITOR_MAX, I.width))
   const iw = W - 2 // inside the side padding
@@ -153,6 +153,7 @@ export function drawMonitor({ Box, Text, Button }: Els, I: Input & { rows?: numb
   }
   /** A quiet section, one row each: a ▸/▾ button, a bold title, a hairline, a figure at the right, then the body once opened. */
   const opened = new Set(m.opened ?? DEFAULT_OPEN)
+  const heads = new Set<RenderChildren>()
   const section = (title: string, right: Seg[], body: RenderChildren[], w = iw, titleColor: string = C.light): RenderChildren[] => {
     const open = opened.has(title)
     if (!body.some(Boolean)) body = [line(['none', C.dark])]
@@ -166,6 +167,7 @@ export function drawMonitor({ Box, Text, Button }: Els, I: Input & { rows?: numb
         {fits && <Box flexShrink={0}>{line([' ', undefined], ...right)}</Box>}
       </Box>
     )
+    heads.add(head)
     const tail = !fits && <Box flexDirection="row" justifyContent="flex-end" width={w}>{line(...right)}</Box>
     return [head, tail, ...(open ? body.filter(Boolean) : [])].filter(Boolean)
   }
@@ -356,14 +358,15 @@ export function drawMonitor({ Box, Text, Button }: Els, I: Input & { rows?: numb
   const rows = [header, attentionBox, bill, context, tokenBox, modelBox, ...useBoxes, monitorBox, tasksBox]
     .filter((b): b is RenderChildren[] => !!b)
     .flatMap((block, i) => (i ? [gap, ...block] : block))
-  const viewH = I.rows && I.rows > 0 ? I.rows : rows.length
-  const max = Math.max(0, rows.length - viewH)
-  const off = Math.min(Math.max(0, I.monOffset ?? 0), max)
+  // A section's head holds its Button, so it takes `btnRows` cells; every other row one.
+  const hs = rows.map(r => (heads.has(r) ? I.btnRows ?? 1 : 1))
+  const viewH = I.rows && I.rows > 0 ? I.rows : hs.reduce((a, b) => a + b, 0)
+  const { max, shown } = windowOf(rows, hs, viewH, I.monOffset ?? 0)
   return {
     max,
     el: (
       <Box flexDirection="column" width={W} height={viewH} paddingX={1} overflow="hidden">
-        {rows.slice(off, off + viewH)}
+        {shown.map(el => <Box flexShrink={0}>{el}</Box>)}
       </Box>
     ),
   }
@@ -438,7 +441,7 @@ const SPLIT_COLUMNS = MONITOR_SIDE + 1 + 30
  * MONITOR_SIDE columns when wide, monitor on top when narrow, with a line between them. The subagents half shows even
  * before the first subagent. The monitor fits its part; the subagents scroll from `offset`.
  */
-export function drawPane(els: Els, I: Input & { rows: number; offset: number; monOffset: number; showMonitor: boolean; showAgents: boolean; onToggleAgent: (id: string) => void; onToggleSection: (id: string) => void }): { el: RenderChildren; agents?: AgentsBox; max: number; monitor?: AgentsBox; monMax: number } {
+export function drawPane(els: Els, I: Input & { rows: number; offset: number; monOffset: number; btnRows?: number; showMonitor: boolean; showAgents: boolean; onToggleAgent: (id: string) => void; onToggleSection: (id: string) => void }): { el: RenderChildren; agents?: AgentsBox; max: number; monitor?: AgentsBox; monMax: number } {
   const { m } = I
   const subs = m.order.slice(1).map(id => m.owners[id]!).filter(Boolean)
   if (!I.showAgents) {
@@ -458,7 +461,7 @@ export function drawPane(els: Els, I: Input & { rows: number; offset: number; mo
   const states = classify(m, I.agents, I.now)
   const { k } = billOf(m, I.usage)
   const flow = drawFlow(els, {
-    agents: subs, states, now: I.now, tick: I.tick, width: box.width - 2, height: box.height, offset: I.offset,
+    agents: subs, states, now: I.now, tick: I.tick, width: box.width - 2, height: box.height, offset: I.offset, btnRows: I.btnRows,
     expanded: new Set(m.expanded ?? []), onToggle: I.onToggleAgent,
     colorOf: o => LANE[(subs.indexOf(o) + 1) % LANE.length]!, cost: o => sumTok(o.usd) * k,
     window: I.cx?.window ?? I.usage.context.window,
