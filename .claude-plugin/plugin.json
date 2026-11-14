@@ -1,6 +1,6 @@
 {
   "name": "session-monitor",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "Live cost, context and agent-team dashboard in a pane beside the chat (CLI, Desktop, VS Code)",
   "author": { "name": "cuongnp" },
   "license": "MIT",
